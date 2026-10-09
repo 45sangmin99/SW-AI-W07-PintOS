@@ -90,11 +90,18 @@ timer_elapsed (int64_t then) {
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
-	int64_t start = timer_ticks ();
-
+	/* 
+	 * Value of 'start' may become invalid at if statement 
+	 * because of the possiblities of context switching
+	 * Therefore, we have to disable interrupts to prevent it.
+	 */
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	enum intr_level old_level = intr_disable();
+	int64_t start = timer_ticks ();
+	// while (timer_elapsed (start) < ticks)
+	// 	thread_yield ();
+	if(timer_elapsed(start)<ticks) thread_sleep(start+ticks);
+	intr_set_level(old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -126,6 +133,7 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+	
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

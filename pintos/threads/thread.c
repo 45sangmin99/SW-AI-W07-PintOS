@@ -28,6 +28,12 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/*
+ * sleep 상태의 리스트를 관리하기 위함
+ * 깨어날 리스트를 찾게 하고, 레디 리스트로 옮기는 것까지 수행해야함
+ */
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -108,6 +114,7 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&sleep_list);
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -149,9 +156,23 @@ thread_tick (void) {
 	else
 		kernel_ticks++;
 
+	update_sleep_list();
+
 	/* Enforce preemption. */
 	if (++thread_ticks >= TIME_SLICE)
 		intr_yield_on_return ();
+}
+
+void
+update_sleep_list(){
+	int64_t tick = timer_ticks ();
+	struct thread* sleep_thread = list_entry(list_begin(&sleep_list), struct thread, elem);
+	while(sleep_thread && sleep_thread->wakeup_tick < tick){
+		// list_insert(list_tail(&ready_list),&(sleep_thread->elem));
+		sleep_thread = list_entry(list_next(&(sleep_thread->elem)), struct thread, elem);
+		list_insert(&ready_list, &(thread_current()->elem));
+		//팝해야댐
+	}
 }
 
 /* Prints thread statistics. */
@@ -224,6 +245,30 @@ thread_block (void) {
 	schedule ();
 }
 
+static bool 
+compare_wakeup(struct list_elem *a, struct list_elem *b){
+	return 
+	(struct thread *)list_entry(b, struct thread, elem)->wakeup_tick 
+	>= 
+	(struct thread *)list_entry(a, struct thread, elem)->wakeup_tick;
+}
+
+void 
+thread_sleep(int64_t){
+	/*
+	 * 현재의 쓰레드가 idle하지 않다면
+	 * caller의 state를 BLOCKED로 바꾸고
+	 * wakeup까지의 local tick에 등록하고
+	 * 글로벌 틱은 업데이트 하고 싶으면 하고
+	 * 그리고 스케쥴을 호출하는 함수
+	 * 만약 쓰레드 리스트를 복제하려면 인터럽트를 끄고 작동해야함
+	 */
+	ASSERT(thread_current() != idle_thread);
+	struct thread *t = thread_current();
+	t->wakeup_tick = timer_ticks() + TIME_SLICE;
+	list_insert_ordered(&sleep_list, &(t->elem), compare_wakeup, NULL);
+	thread_block();
+}
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
