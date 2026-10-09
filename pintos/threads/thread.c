@@ -4,6 +4,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "devices/timer.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -156,23 +157,11 @@ thread_tick (void) {
 	else
 		kernel_ticks++;
 
-	update_sleep_list();
+	thread_wakeup();
 
 	/* Enforce preemption. */
 	if (++thread_ticks >= TIME_SLICE)
 		intr_yield_on_return ();
-}
-
-void
-update_sleep_list(){
-	int64_t tick = timer_ticks ();
-	struct thread* sleep_thread = list_entry(list_begin(&sleep_list), struct thread, elem);
-	while(sleep_thread && sleep_thread->wakeup_tick < tick){
-		// list_insert(list_tail(&ready_list),&(sleep_thread->elem));
-		sleep_thread = list_entry(list_next(&(sleep_thread->elem)), struct thread, elem);
-		list_insert(&ready_list, &(thread_current()->elem));
-		//팝해야댐
-	}
 }
 
 /* Prints thread statistics. */
@@ -254,7 +243,7 @@ compare_wakeup(struct list_elem *a, struct list_elem *b){
 }
 
 void 
-thread_sleep(int64_t){
+thread_sleep(int64_t wakeup_tick){
 	/*
 	 * 현재의 쓰레드가 idle하지 않다면
 	 * caller의 state를 BLOCKED로 바꾸고
@@ -265,7 +254,7 @@ thread_sleep(int64_t){
 	 */
 	ASSERT(thread_current() != idle_thread);
 	struct thread *t = thread_current();
-	t->wakeup_tick = timer_ticks() + TIME_SLICE;
+	t->wakeup_tick = wakeup_tick;
 	list_insert_ordered(&sleep_list, &(t->elem), compare_wakeup, NULL);
 	thread_block();
 }
@@ -288,6 +277,17 @@ thread_unblock (struct thread *t) {
 	list_push_back (&ready_list, &t->elem);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
+}
+
+void
+thread_wakeup(){
+	int64_t tick = timer_ticks();
+	struct thread *t = list_entry(list_begin(&sleep_list), struct thread, elem);
+	while(t && t->wakeup_tick < tick){
+		list_pop_front(&sleep_list);
+		thread_unblock(t);
+		t = list_entry(list_begin(&sleep_list), struct thread, elem);
+	}
 }
 
 /* Returns the name of the running thread. */
