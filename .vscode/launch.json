@@ -1,0 +1,47 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Pintos: debug threads test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/pintos/threads/build/kernel.o",
+            "cwd": "${workspaceFolder}/pintos/threads/build",
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerServerAddress": "127.0.0.1:1234",
+            "debugServerPath": "/usr/bin/python3",
+            "debugServerArgs": "\"${workspaceFolder}/.vscode/pintos-debug.py\" \"${input:pintosTest}\"",
+            "serverStarted": "PINTOS_QEMU_READY",
+            "filterStdout": true,
+            "filterStderr": true,
+            "serverLaunchTimeout": 15000,
+            "stopAtEntry": false,
+            "stopAtConnect": false,
+            "launchCompleteCommand": "exec-continue",
+            "hardwareBreakpoints": {
+                "require": true
+            },
+            "setupCommands": [
+                {
+                    "text": "-gdb-set remotetimeout 10"
+                }
+            ],
+            "postRemoteConnectCommands": [
+                {
+                    "description": "Pause when the selected test begins.",
+                    "text": "-break-insert -h -t run_test"
+                }
+            ],
+            "preLaunchTask": "Pintos: build threads"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "pintosTest",
+            "type": "promptString",
+            "description": "실행할 Pintos 테스트 이름",
+            "default": "alarm-single"
+        }
+    ]
+}

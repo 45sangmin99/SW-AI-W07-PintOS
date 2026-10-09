@@ -40,6 +40,11 @@ static struct lock tid_lock;
 /* Thread destruction requests */
 static struct list destruction_req;
 
+/* Thread destruction requests */
+static struct list sleep_list;
+
+static int64_t next_wakeup_ticks = 0;
+
 /* Statistics. */
 static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
@@ -62,6 +67,10 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+
+static bool wakeup_less (const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -109,6 +118,7 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
+	list_init (&sleep_list);
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -587,4 +597,62 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+// /* Yields the CPU.  The current thread is not put to sleep and
+//    may be scheduled again immediately at the scheduler's whim. */
+// void
+// thread_yield (void) {
+// 	struct thread *curr = thread_current ();
+// 	enum intr_level old_level;
+
+// 	ASSERT (!intr_context ());
+
+// 	old_level = intr_disable ();
+// 	if (curr != idle_thread)
+// 		list_push_back (&ready_list, &curr->elem);
+// 	do_schedule (THREAD_READY);
+// 	intr_set_level (old_level);
+// }
+
+
+void
+thread_sleep (int64_t ticks) {
+	struct thread *curr = thread_current ();
+	enum intr_level old_level;
+
+	ASSERT (!intr_context ());
+
+	old_level = intr_disable ();
+	if (curr != idle_thread)
+	{
+		curr->wakeup_tick = ticks;
+		list_insert_ordered(&sleep_list, &curr->elem, wakeup_less, NULL);
+	}
+	do_schedule (THREAD_BLOCKED);
+	intr_set_level (old_level);
+}
+
+void thread_wakeup (int64_t timer_ticks)
+{
+	while (!list_empty(&sleep_list))
+	{
+		struct thread *wakeup_thread = list_entry(list_begin(&sleep_list), struct thread, elem);
+		if(wakeup_thread->wakeup_tick > timer_ticks)
+		{
+			break;
+		}
+		list_pop_front(&sleep_list);
+		thread_unblock(wakeup_thread);
+	}
+}
+
+static bool wakeup_less (const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED)
+{
+	const struct thread *ta = list_entry(a, struct thread, elem);
+	const struct thread *tb = list_entry(b, struct thread, elem);
+
+	return ta->wakeup_tick < tb->wakeup_tick;
 }
