@@ -11,7 +11,7 @@
    * 이번 도커 환경은 ubuntu 22.04를 지원하여 vscode의 최신 버전에서 원격 연결이 안되는 문제를 해결하였습니다.
 * pintos 도커 환경은 kaist-pintos에서 추천하는 qemu 에뮬레이터를 설치하고 사용합니다. 
 * pintos 도커 환경은 9주차부터 13주차까지 같은 환경을 사용합니다. 이 기간동안 별도의 개발 환경을 제공하지 않습니다.
-* 기존 도커 환경과 달리 `vscode`와 통합된 디버깅 환경(F5로 시작하는)을 제공하지 않습니다. 디버깅이 필요한 경우 `gdb`를 사용하세요. 
+* 컨테이너 안에서 F5를 누르면 `debug_pintos`로 테스트를 디버깅할 수 있습니다.
 * vscode에서 터미널을 오픈하면 자동으로 `source /workspaces/pintos_22.04_lab_docker/pintos/activate`를 실행합니다.
 
 ---
@@ -100,7 +100,17 @@ pintos_22.04_lab_docker/
 ---
 
 ## 7. C 파일에 브레이크포인트 설정 후 디버깅 (F5)
-pintos 랩에서는 vscode기반의 디버깅을 지원하지 않습니다. 
+
+컨테이너에서 프로젝트를 연 뒤, C 코드에 브레이크포인트를 설정하고 **F5**를 누릅니다.
+`debug_pintos`가 빌드 → `.vscode/pintos-debug.json`에서 선택한 테스트 실행 → GDB 연결 순서로 시작됩니다.
+브레이크포인트에서 F5로 계속 실행하면, 테스트 종료 후 **터미널**에 `[PASS]` 또는 `[FAIL]`과 채점 상세가 표시됩니다.
+테스트 완료 전에 디버깅을 중지하면 `[STOPPED]`로 표시됩니다.
+
+디버그 실행 로그와 결과는 `pintos/threads/build/debug/tests/threads/`에 저장됩니다.
+다른 테스트를 디버깅하려면 `.vscode/pintos-debug.json`의 `test` 값만 바꿉니다.
+디버깅 종료 후 채점은 실제 실행한 테스트를 기준으로 합니다.
+전체 threads 테스트는 명령어 팔레트의 **Tasks: Run Task → Run Pintos (all threads tests)**로 실행합니다.
+GDB 포트(1234)가 사용 중이면 기존 디버그 세션을 중지한 뒤 F5를 누릅니다.
 
 ---
 ## 8. 새로운 Git 리포지토리에 Commit & Push 하기
