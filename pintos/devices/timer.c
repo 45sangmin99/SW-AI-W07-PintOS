@@ -20,6 +20,7 @@
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
+
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -102,6 +103,7 @@ void timer_sleep(int64_t sleep_ticks)
     thread_sleep(wakeup_tick);
     intr_set_level(old_level);
 }
+
 
 /* Suspends execution for approximately MS milliseconds. */
 void timer_msleep(int64_t ms)
