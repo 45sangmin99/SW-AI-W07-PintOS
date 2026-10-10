@@ -242,7 +242,7 @@ void thread_block(void)
 	schedule();
 }
 
-static bool priority_first(const struct list_elem *elem, const struct list_elem *e, void *aux UNUSED)
+bool priority_first(const struct list_elem *elem, const struct list_elem *e, void *aux UNUSED)
 {
 	// 새로 넣을 스레드의 우선순위
 	int cur_priority = list_entry(elem, struct thread, elem)->priority;
@@ -340,7 +340,7 @@ void thread_yield(void)
 }
 
 /* Ordered wakeup time comparison; equal wakeup times keep FIFO order. */
-static bool wake_less(const struct list_elem *elem,
+bool wake_less(const struct list_elem *elem,
                       const struct list_elem *e, void *aux UNUSED)
 {
 	int64_t cur_wakeup_tick = list_entry(elem, struct thread, elem)->wakeup_tick;

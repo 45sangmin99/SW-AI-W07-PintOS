@@ -127,4 +127,7 @@ void thread_sleep (int64_t ticks);
 
 void thread_wakeup (int64_t timer_ticks);
 
+bool priority_first(const struct list_elem *, const struct list_elem *, void *aux);
+bool wake_less(const struct list_elem *, const struct list_elem *, void *aux);
+
 #endif /* threads/thread.h */
