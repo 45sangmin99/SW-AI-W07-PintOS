@@ -86,6 +86,22 @@ static tid_t allocate_tid (void);
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
+bool 
+compare_wakeup(struct list_elem *a, struct list_elem *b){
+	return 
+	((struct thread *)list_entry(b, struct thread, elem))->wakeup_tick 
+	>= 
+	((struct thread *)list_entry(a, struct thread, elem))->wakeup_tick;
+}
+
+bool 
+compare_priority(struct list_elem *a, struct list_elem *b){
+	return 
+	((struct thread *)list_entry(b, struct thread, elem))->priority 
+	<= 
+	((struct thread *)list_entry(a, struct thread, elem))->priority;
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -194,6 +210,8 @@ thread_create (const char *name, int priority,
 
 	ASSERT (function != NULL);
 
+	enum intr_level old_level = intr_disable();
+
 	/* Allocate thread. */
 	t = palloc_get_page (PAL_ZERO);
 	if (t == NULL)
@@ -217,6 +235,10 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	if(t->priority > thread_current()->priority)thread_yield();
+
+	intr_set_level(old_level);
+
 	return tid;
 }
 
@@ -232,14 +254,6 @@ thread_block (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
 	thread_current ()->status = THREAD_BLOCKED;
 	schedule ();
-}
-
-static bool 
-compare_wakeup(struct list_elem *a, struct list_elem *b){
-	return 
-	(struct thread *)list_entry(b, struct thread, elem)->wakeup_tick 
-	>= 
-	(struct thread *)list_entry(a, struct thread, elem)->wakeup_tick;
 }
 
 void 
@@ -274,7 +288,8 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	// list_push_back (&ready_list, &t->elem); // <-이거만 priority로 바꾸면 끝
+	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -283,7 +298,7 @@ void
 thread_wakeup(){
 	int64_t tick = timer_ticks();
 	struct thread *t = list_entry(list_begin(&sleep_list), struct thread, elem);
-	while(t && t->wakeup_tick < tick){
+	while(t && t->wakeup_tick <= tick){
 		list_pop_front(&sleep_list);
 		thread_unblock(t);
 		t = list_entry(list_begin(&sleep_list), struct thread, elem);
@@ -348,7 +363,7 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &(curr->elem), compare_priority, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -357,6 +372,8 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	list_sort(&ready_list,compare_priority,NULL);
+	if(new_priority > thread_current()->priority)thread_yield();
 }
 
 /* Returns the current thread's priority. */

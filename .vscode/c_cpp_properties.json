@@ -4,6 +4,7 @@
             "name": "Pintos",
             "includePath": [
                 "${workspaceFolder}",
+                "${workspaceFolder}/pintos",
                 "${workspaceFolder}/pintos/include/lib",
                 "${workspaceFolder}/pintos/include",
                 "${workspaceFolder}/pintos/include/lib/kernel",

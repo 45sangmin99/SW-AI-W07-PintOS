@@ -2,6 +2,7 @@
 """Start a paused Pintos VM, capture its output, and check it after debugging."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 import signal
@@ -77,6 +78,8 @@ def start_debug(root, build, output_dir, test):
             stderr=errors,
             start_new_session=True,
         )
+    # Grade the test that actually ran, even if the setting changes mid-session.
+    (output_dir / "last-test").write_text(test + "\n")
     log = test_path.with_suffix(".output").open()
 
     def show_output():
@@ -119,13 +122,23 @@ def start_debug(root, build, output_dir, test):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Check the captured debug output")
-    parser.add_argument("test", nargs="?", default="alarm-single")
+    parser.add_argument("test", nargs="?", help="Override the test in pintos-debug.json")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     build = root / "pintos/threads/build"
     output_dir = build / "debug"
+    if args.test is None:
+        last_test = output_dir / "last-test"
+        if args.check and last_test.is_file():
+            args.test = last_test.read_text().strip()
+        else:
+            config = root / ".vscode/pintos-debug.json"
+            try:
+                args.test = json.loads(config.read_text())["test"]
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                parser.error(f"Cannot read test setting from {config}: {error}")
     # Restrict the argument to a known threads test before creating output files.
-    if "/" in args.test or "\\" in args.test or not (
+    if not isinstance(args.test, str) or "/" in args.test or "\\" in args.test or not (
         root / "pintos/tests/threads" / f"{args.test}.ck"
     ).is_file():
         parser.error(f"Unknown threads test: {args.test}")

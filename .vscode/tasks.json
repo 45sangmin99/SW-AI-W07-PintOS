@@ -29,8 +29,7 @@
             "command": "/usr/bin/python3",
             "args": [
                 "${workspaceFolder}/.vscode/pintos-debug.py",
-                "--check",
-                "alarm-single"
+                "--check"
             ],
             "problemMatcher": [],
             "presentation": {
