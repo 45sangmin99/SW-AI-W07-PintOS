@@ -297,6 +297,20 @@ list_empty (struct list *list) {
 	return list_begin (list) == list_end (list);
 }
 
+struct list_elem *
+list_find (struct list *list, list_match_func *match, void *aux) {
+	struct list_elem *e;
+
+	ASSERT (list != NULL);
+	ASSERT (match != NULL);
+
+	for (e = list_begin (list); e != list_end (list); e = list_next (e))
+		if (match (e, aux))
+			return e;
+
+	return NULL;
+}
+
 /* Swaps the `struct list_elem *'s that A and B point to. */
 static void
 swap (struct list_elem **a, struct list_elem **b) {

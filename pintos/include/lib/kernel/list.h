@@ -138,6 +138,10 @@ struct list_elem *list_back (struct list *);
 size_t list_size (struct list *);
 bool list_empty (struct list *);
 
+typedef bool list_match_func (const struct list_elem *elem, void *aux);
+
+struct list_elem *list_find (struct list *, list_match_func *, void *aux);
+
 /* Miscellaneous. */
 void list_reverse (struct list *);
 

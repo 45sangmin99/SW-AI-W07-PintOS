@@ -156,7 +156,6 @@ void thread_tick(void)
 		// 즉 CPU가 실제로 일한 시간
 		kernel_ticks++;
 
-
 	/* Enforce preemption. */
 	// 선점: 지금 스레드가 4틱 연속으로 썼으면 양보시킴
 	if (++thread_ticks >= TIME_SLICE)
@@ -248,6 +247,17 @@ bool priority_first(const struct list_elem *elem, const struct list_elem *e, voi
 	int cur_priority = list_entry(elem, struct thread, elem)->priority;
 	// 현재 리스트안에 있는 스레드의 우선순위
 	int target_priority = list_entry(e, struct thread, elem)->priority;
+
+	return cur_priority > target_priority;
+}
+
+bool donator_priority_first(const struct list_elem *elem,
+                            const struct list_elem *e, void *aux UNUSED)
+{
+	// 새로 넣을 스레드의 우선순위
+	int cur_priority = list_entry(elem, struct thread, donator_elem)->priority;
+	// 현재 리스트안에 있는 스레드의 우선순위
+	int target_priority = list_entry(e, struct thread, donator_elem)->priority;
 
 	return cur_priority > target_priority;
 }
@@ -390,7 +400,15 @@ void thread_set_priority(int new_priority)
 	ASSERT(PRI_MIN <= new_priority && new_priority <= PRI_MAX);
 
 	enum intr_level old_level = intr_disable();
-	thread_current()->priority = new_priority;
+	if(thread_current()->priority == thread_current()->old_priority)
+	{
+		thread_current()->priority = new_priority;
+		thread_current()->old_priority = new_priority;
+	}
+	else
+	{
+		thread_current()->old_priority = new_priority;
+	}
 
 	/* The running thread is not in ready_list, so only a yield is needed. */
 	if (!list_empty(&ready_list))
@@ -400,6 +418,11 @@ void thread_set_priority(int new_priority)
 			thread_yield();
 	}
 	intr_set_level(old_level);
+}
+
+void sort_ready_lists(void)
+{
+	list_sort(&ready_list, priority_first, NULL);
 }
 
 /* Returns the current thread's priority. */
@@ -499,7 +522,10 @@ init_thread(struct thread *t, const char *name, int priority)
 	strlcpy(t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
 	t->priority = priority;
+	t->old_priority = priority;
 	t->magic = THREAD_MAGIC;
+	t->waiting_lock = NULL;
+	list_init(&t->donator_list);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

@@ -69,9 +69,13 @@ struct thread {
     char name[16];                      /* Name (for debugging purposes). */
     int priority;                       /* Priority. */
     int64_t wakeup_tick;                /* Tick at which to wake up. */
+    struct list donator_list;          /* Incoming priority donations. */
+    struct lock *waiting_lock;         /* Lock this thread is waiting for. */
+    int64_t old_priority;              /* Base priority set by the thread. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    struct list_elem donator_elem;     /* Donation list element. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -116,6 +120,8 @@ void thread_yield(void);
 int thread_get_priority(void);
 void thread_set_priority(int);
 
+void sort_ready_lists(void);
+
 int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
@@ -128,6 +134,8 @@ void thread_sleep (int64_t ticks);
 void thread_wakeup (int64_t timer_ticks);
 
 bool priority_first(const struct list_elem *, const struct list_elem *, void *aux);
+bool donator_priority_first(const struct list_elem *,
+                            const struct list_elem *, void *aux);
 bool wake_less(const struct list_elem *, const struct list_elem *, void *aux);
 
 #endif /* threads/thread.h */

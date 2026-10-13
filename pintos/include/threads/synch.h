@@ -28,6 +28,12 @@ bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
 
+/* Finds a matching donation element without removing it.
+   Keep interrupts off from searching until removal is complete. */
+/* 해당 락의 기부 요소를 찾아 반환하며, 목록에서 제거하지 않습니다.
+   검색부터 제거가 끝날 때까지 인터럽트 보호를 유지해야 합니다. */
+struct list_elem *find_donator_for_lock (struct thread *, struct lock *);
+
 /* Condition variable. */
 struct condition {
 	struct list waiters;        /* List of waiting threads. */
