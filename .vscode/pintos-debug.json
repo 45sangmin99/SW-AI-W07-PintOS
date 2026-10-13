@@ -1,3 +1,3 @@
 {
-    "test": "alarm-priority"
+    "test": "priority-fifo"
 }

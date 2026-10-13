@@ -221,7 +221,7 @@ tid_t thread_create(const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock(t);
 
-	if(t->priority > thread_current()->priority)thread_yield();
+	if(t->eff_priority > thread_get_priority())thread_yield();
 
 	intr_set_level(old_level);
 
@@ -245,9 +245,9 @@ void thread_block(void)
 bool priority_first(const struct list_elem *elem, const struct list_elem *e, void *aux UNUSED)
 {
 	// 새로 넣을 스레드의 우선순위
-	int cur_priority = list_entry(elem, struct thread, elem)->priority;
+	int cur_priority = list_entry(elem, struct thread, elem)->eff_priority;
 	// 현재 리스트안에 있는 스레드의 우선순위
-	int target_priority = list_entry(e, struct thread, elem)->priority;
+	int target_priority = list_entry(e, struct thread, elem)->eff_priority;
 
 	return cur_priority > target_priority;
 }
@@ -379,7 +379,7 @@ void thread_wakeup(int64_t ticks)
 		thread_unblock(t);
 
 		/* A newly awakened higher-priority thread should run next. */
-		if (t->priority > thread_current()->priority)
+		if (t->eff_priority > thread_get_priority())
 			intr_yield_on_return();
 	}
 }
@@ -391,12 +391,13 @@ void thread_set_priority(int new_priority)
 
 	enum intr_level old_level = intr_disable();
 	thread_current()->priority = new_priority;
+	set_eff_priority(thread_current());
 
 	/* The running thread is not in ready_list, so only a yield is needed. */
 	if (!list_empty(&ready_list))
 	{
 		struct thread *highest = list_entry(list_front(&ready_list), struct thread, elem);
-		if (highest->priority > new_priority)
+		if (highest->eff_priority > new_priority)
 			thread_yield();
 	}
 	intr_set_level(old_level);
@@ -405,7 +406,7 @@ void thread_set_priority(int new_priority)
 /* Returns the current thread's priority. */
 int thread_get_priority(void)
 {
-	return thread_current()->priority;
+	return thread_current()->eff_priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -499,6 +500,8 @@ init_thread(struct thread *t, const char *name, int priority)
 	strlcpy(t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
 	t->priority = priority;
+	t->eff_priority = priority;
+	list_init(&t->donations);
 	t->magic = THREAD_MAGIC;
 }
 
