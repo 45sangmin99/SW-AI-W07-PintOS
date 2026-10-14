@@ -25,6 +25,7 @@
    Do not modify this value. */
 #define THREAD_BASIC 0xd42df210
 
+static struct list threads;
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -68,6 +69,8 @@ static void schedule(void);
 static tid_t allocate_tid(void);
 static bool wake_less(const struct list_elem *, const struct list_elem *, void *);
 
+fixed_t load_avg;
+
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -110,9 +113,12 @@ void thread_init(void)
 
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
+	list_init (&threads);
 	list_init (&ready_list);
 	list_init (&sleep_list);
 	list_init (&destruction_req);
+
+	load_avg = int_to_fixed(0);
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread();
@@ -142,6 +148,40 @@ void thread_start(void)
 void thread_tick(void)
 {
 	struct thread *t = thread_current();
+	
+	if(thread_mlfqs){
+		/**
+		 * Thread priority is calculated initially at thread initialization. 
+		 * It is also recalculated once every fourth clock tick, for every thread. 
+		 * In either case, it is determined by the formula:
+		 * priority = PRI_MAX - (recent_cpu / 4) - (nice * 2)
+		 */
+		struct thread *t = thread_current();
+		t->recent_cpu += int_to_fixed(t != idle_thread);
+		if(timer_ticks()%TIMER_FREQ==0){
+			int ready_threads = thread_current() != idle_thread;
+			for(struct list_elem *element = list_begin(&ready_list);
+				element != list_tail(&ready_list);
+				element = list_next(element)){
+				ready_threads++;
+			}
+			load_avg = fixed_mul(int_div(59,60),load_avg) + (int_div(1,60) * ready_threads);
+			for(struct list_elem *element = list_begin(&threads);
+				element != list_tail(&threads);
+				element = list_next(element)){
+				struct thread *t = list_entry(element, struct thread, threads_elem);
+				t->recent_cpu = fixed_mul(fixed_div(2*load_avg,(2*load_avg+int_to_fixed(1))),t->recent_cpu) + int_to_fixed(t->nice);
+			}
+		}
+		if(timer_ticks()%4==0){
+			for(struct list_elem *element = list_begin(&threads);
+				element != list_tail(&threads);
+				element = list_next(element)){
+				struct thread *t = list_entry(element, struct thread, threads_elem);
+				t->eff_priority = PRI_MAX-(t->nice)*2-fixed_to_int(t->recent_cpu/4);
+			}
+		}
+	}
 
 	/* Update statistics. */
 	// idle 스레드는 할 일이 하나도 없을 때 CPU가 대신 붙잡고 있는 쉬는 스레드
@@ -246,12 +286,9 @@ void thread_block(void)
 
 bool priority_first(const struct list_elem *elem, const struct list_elem *e, void *aux UNUSED)
 {
-	// 새로 넣을 스레드의 우선순위
-	int cur_priority = list_entry(elem, struct thread, elem)->eff_priority;
-	// 현재 리스트안에 있는 스레드의 우선순위
-	int target_priority = list_entry(e, struct thread, elem)->eff_priority;
-
-	return cur_priority > target_priority;
+	size_t offset = aux ? *(size_t *) aux : offsetof(struct thread, elem);
+	return ((struct thread *)((char *)elem - offset))->eff_priority
+	> ((struct thread *)((char *)e - offset))->eff_priority;
 }
 
 /* Yield only after the caller has completed its atomic state update.
@@ -462,30 +499,27 @@ int thread_get_priority(void)
 }
 
 /* Sets the current thread's nice value to NICE. */
-void thread_set_nice(int nice UNUSED)
+void thread_set_nice(int nice)
 {
-	/* TODO: Your implementation goes here */
+	thread_current()->nice = nice;
 }
 
 /* Returns the current thread's nice value. */
 int thread_get_nice(void)
 {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int thread_get_load_avg(void)
 {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return fixed_to_int(load_avg*100);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int thread_get_recent_cpu(void)
 {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return fixed_to_int(thread_current()->recent_cpu*100);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -556,6 +590,7 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->waiting_lock = NULL;
 	list_init(&t->donations);
 	t->magic = THREAD_MAGIC;
+	list_push_back(&threads, &t->threads_elem);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -720,6 +755,7 @@ schedule(void)
 		if (curr && curr->status == THREAD_DYING && curr != initial_thread)
 		{
 			ASSERT(curr != next);
+			list_remove(&curr->threads_elem);
 			list_push_back(&destruction_req, &curr->elem);
 		}
 

@@ -26,7 +26,7 @@ def get_temp_dsk_name():
 class Pintos(object):
     def __init__(self, ttest=False, mem=256, no_vga=True, serial=False,
                  args=[], mnts=[], hostfns=[], guestfns=[], gdb=False,
-                 fs='fs.dsk', swap='swap.dsk', timeout=0):
+                 fs='fs.dsk', swap='swap.dsk', timeout=0, icount=None):
         self.ttest = ttest
         self.mem = mem
         self.no_vga = no_vga
@@ -34,6 +34,7 @@ class Pintos(object):
         self.gdb = gdb
         self.proc = None
         self.timeout = timeout
+        self.icount = icount
         self.host_fns = hostfns
         self.guest_fns = guestfns
         self.mnts = mnts
@@ -118,6 +119,8 @@ class Pintos(object):
             cmd.append('-nographic')
         if self.gdb:
             cmd.extend(['-s', '-S'])
+        if self.icount is not None:
+            cmd.extend(['-icount', self.icount])
 
         for idx, d in enumerate(['os', 'fs', 'scratch', 'swap']):
             if self.bdevs.get(d, None):
@@ -204,6 +207,8 @@ if __name__ == '__main__':
                         help='Additional mounting disks')
     parser.add_argument('--gdb', action='store_true', default=False,
                         help='Debug with gdb')
+    parser.add_argument('--icount',
+                        help='QEMU virtual instruction clock settings')
     parser.add_argument('-t', '--threads-tests', action='store_true',
                         default=False,
                         help='Run proj1 test cases with USERPROG flag')
@@ -219,6 +224,7 @@ if __name__ == '__main__':
     args = parser.parse_args(util_args)
     Pintos(ttest=args.threads_tests, mem=args.memory, no_vga=args.no_vga,
            args=kern_args, timeout=args.timeout, fs=args.fs_disk, gdb=args.gdb,
+           icount=args.icount,
            swap=args.swap_disk,
            mnts=[f[0] for f in args.MNTS],
            hostfns=[f[0].split(':') for f in args.HOSTFNS],

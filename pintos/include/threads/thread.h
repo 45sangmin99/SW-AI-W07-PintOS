@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/fixed-point.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -69,12 +70,15 @@ struct thread {
     char name[16];                      /* Name (for debugging purposes). */
     int priority;                       /* Base priority set by the thread. */
     int eff_priority;                   /* Effective priority, including donations. */
+    int nice;
+    fixed_t recent_cpu;
     int64_t wakeup_tick;                /* Tick at which to wake up. */
     struct list_elem donator_elem;      /* Element in the lock holder's donations. */
     struct list donations;             /* Threads donating to this thread. */
     struct lock *waiting_lock;          /* Lock this thread is waiting for. */
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    struct list_elem threads_elem;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

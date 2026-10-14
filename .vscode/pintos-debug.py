@@ -16,8 +16,15 @@ def stop_requested(signum, frame):
     raise SystemExit(0)
 
 
+def get_test_path(test):
+    directory = Path("tests/threads")
+    if test.startswith("mlfqs-"):
+        directory /= "mlfqs"
+    return directory / test
+
+
 def check_result(root, build, test):
-    test_path = Path("tests/threads") / test
+    test_path = get_test_path(test)
     output = build / test_path.with_suffix(".output")
     result = build / test_path.with_suffix(".result")
     result.unlink(missing_ok=True)
@@ -48,7 +55,7 @@ def check_result(root, build, test):
     return 0 if verdict == "PASS" else 1
 
 
-def start_debug(root, build, output_dir, test):
+def start_debug(root, build, output_dir, test, icount=None):
     with socket.socket() as probe:
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -58,7 +65,7 @@ def start_debug(root, build, output_dir, test):
 
     signal.signal(signal.SIGTERM, stop_requested)
     signal.signal(signal.SIGINT, stop_requested)
-    test_path = output_dir / "tests/threads" / test
+    test_path = output_dir / get_test_path(test)
     test_path.parent.mkdir(parents=True, exist_ok=True)
     # The standard panic checker looks for kernel.o in its working directory.
     kernel = output_dir / "kernel.o"
@@ -67,11 +74,18 @@ def start_debug(root, build, output_dir, test):
     test_path.with_suffix(".result").unlink(missing_ok=True)
     # QEMU writes straight to disk so the post-debug task can check the output
     # even if the debug adapter terminates this launcher as soon as QEMU exits.
+    kernel_args = ["-q"]
+    if test.startswith("mlfqs-"):
+        kernel_args.append("-mlfqs")
+    kernel_args.extend(["run", test])
+    pintos_args = [sys.executable, str(root / "pintos/utils/pintos"),
+                   "--gdb", "-m", "20"]
+    if icount is not None:
+        pintos_args.extend(["--icount", icount])
     with test_path.with_suffix(".output").open("w") as output, \
             test_path.with_suffix(".errors").open("w") as errors:
         process = subprocess.Popen(
-            [sys.executable, str(root / "pintos/utils/pintos"),
-             "--gdb", "-m", "20", "--", "-q", "run", test],
+            [*pintos_args, "--", *kernel_args],
             cwd=build,
             stdin=subprocess.DEVNULL,
             stdout=output,
@@ -122,6 +136,7 @@ def start_debug(root, build, output_dir, test):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Check the captured debug output")
+    parser.add_argument("--icount", help="Override QEMU virtual instruction clock settings")
     parser.add_argument("test", nargs="?", help="Override the test in pintos-debug.json")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
@@ -134,17 +149,22 @@ def main():
         else:
             config = root / ".vscode/pintos-debug.json"
             try:
-                args.test = json.loads(config.read_text())["test"]
+                settings = json.loads(config.read_text())
+                args.test = settings["test"]
+                if args.icount is None:
+                    args.icount = settings.get("icount")
             except (OSError, ValueError, KeyError, TypeError) as error:
                 parser.error(f"Cannot read test setting from {config}: {error}")
     # Restrict the argument to a known threads test before creating output files.
     if not isinstance(args.test, str) or "/" in args.test or "\\" in args.test or not (
-        root / "pintos/tests/threads" / f"{args.test}.ck"
+        root / "pintos" / get_test_path(args.test).with_suffix(".ck")
     ).is_file():
         parser.error(f"Unknown threads test: {args.test}")
     if args.check:
         return check_result(root, output_dir, args.test)
-    return start_debug(root, build, output_dir, args.test)
+    if args.icount is not None and not isinstance(args.icount, str):
+        parser.error("icount must be a QEMU settings string or null")
+    return start_debug(root, build, output_dir, args.test, args.icount)
 
 
 if __name__ == "__main__":
