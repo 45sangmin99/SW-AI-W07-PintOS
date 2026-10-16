@@ -12,22 +12,23 @@
 #endif
 
 /* States in a thread's life cycle. */
-enum thread_status {
-    THREAD_RUNNING,     /* Running thread. */
-    THREAD_READY,       /* Not running but ready to run. */
-    THREAD_BLOCKED,     /* Waiting for an event to trigger. */
-    THREAD_DYING        /* About to be destroyed. */
+enum thread_status
+{
+    THREAD_RUNNING, /* Running thread. */
+    THREAD_READY,   /* Not running but ready to run. */
+    THREAD_BLOCKED, /* Waiting for an event to trigger. */
+    THREAD_DYING    /* About to be destroyed. */
 };
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
-#define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
+#define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
 
 /* Thread priorities. */
-#define PRI_MIN 0                       /* Lowest priority. */
-#define PRI_DEFAULT 31                  /* Default priority. */
-#define PRI_MAX 63                      /* Highest priority. */
+#define PRI_MIN 0      /* Lowest priority. */
+#define PRI_DEFAULT 31 /* Default priority. */
+#define PRI_MAX 63     /* Highest priority. */
 
 /* A kernel thread or user process.
  *
@@ -64,19 +65,20 @@ typedef int tid_t;
  *
  * The `elem' member can be used in the run queue, a semaphore
  * wait list, or the sleep list.  These uses are mutually exclusive. */
-struct thread {
+struct thread
+{
     /* Owned by thread.c. */
-    tid_t tid;                          /* Thread identifier. */
-    enum thread_status status;          /* Thread state. */
-    char name[16];                      /* Name (for debugging purposes). */
-    int priority;                       /* Base priority set by the thread. */
-    int eff_priority;                   /* Effective priority, including donations. */
+    tid_t tid;                 /* Thread identifier. */
+    enum thread_status status; /* Thread state. */
+    char name[16];             /* Name (for debugging purposes). */
+    int priority;              /* Base priority set by the thread. */
+    int eff_priority;          /* Effective priority, including donations. */
     int nice;
     fixed_t recent_cpu;
-    int64_t wakeup_tick;                /* Tick at which to wake up. */
-    struct list_elem donator_elem;      /* Element in the lock holder's donations. */
-    struct list donations;             /* Threads donating to this thread. */
-    struct lock *waiting_lock;          /* Lock this thread is waiting for. */
+    int64_t wakeup_tick;           /* Tick at which to wake up. */
+    struct list_elem donator_elem; /* Element in the lock holder's donations. */
+    struct list donations;         /* Threads donating to this thread. */
+    struct lock *waiting_lock;     /* Lock this thread is waiting for. */
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
     struct list_elem threads_elem;      /* for implement mlfqs */
@@ -90,7 +92,7 @@ struct thread {
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
-    uint64_t *pml4;                     /* Page map level 4 */
+    uint64_t *pml4; /* Page map level 4 */
 #endif
 #ifdef VM
     /* Table for whole virtual memory owned by thread. */
@@ -98,8 +100,8 @@ struct thread {
 #endif
 
     /* Owned by thread.c. */
-    struct intr_frame tf;               /* Information for switching. */
-    unsigned magic;                     /* Detects stack overflow. */
+    struct intr_frame tf; /* Information for switching. */
+    unsigned magic;       /* Detects stack overflow. */
 };
 
 /* If false (default), use round-robin scheduler.
