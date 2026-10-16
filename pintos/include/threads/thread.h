@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "threads/interrupt.h"
 #include "threads/fixed-point.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -79,8 +80,15 @@ struct thread
     struct list donations;         /* Threads donating to this thread. */
     struct lock *waiting_lock;     /* Lock this thread is waiting for. */
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem; /* List element. */
-    struct list_elem threads_elem;
+    struct list_elem elem;              /* List element. */
+    struct list_elem threads_elem;      /* for implement mlfqs */
+    /**
+     * 자식이 부모를 세마포어에 넣어서 자식이 waiting을 구현.
+     * linux는 waiting queue를 통해 이를 구현했으나,
+     * 우리는 가진게 semaphore 뿐이니까 세마포어를 씁시다.
+     * https://github.com/torvalds/linux/blob/master/include/linux/sched/signal.h
+     */
+    struct semaphore wait_childexit;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -129,6 +137,8 @@ int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
+
+struct thread *thread_get_by_tid(tid_t);
 
 void do_iret(struct intr_frame *tf);
 

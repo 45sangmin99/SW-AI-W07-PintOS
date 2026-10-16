@@ -410,7 +410,6 @@ tid_t thread_tid(void)
 void thread_exit(void)
 {
 	ASSERT(!intr_context());
-
 #ifdef USERPROG
 	process_exit();
 #endif
@@ -525,6 +524,18 @@ int thread_get_recent_cpu(void)
 	return fixed_to_int(thread_current()->recent_cpu * 100);
 }
 
+/* Find thread pointer by TID */
+struct thread *thread_get_by_tid(tid_t tid){
+	for(struct list_elem *element = list_begin(&threads);
+	element != list_tail(&threads);
+	element = list_next(element)){
+		if(list_entry(element, struct thread, threads_elem)->tid == tid){
+			return list_entry(element, struct thread, threads_elem);
+		}
+	};
+	NOT_REACHED();
+}
+
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -594,6 +605,7 @@ init_thread(struct thread *t, const char *name, int priority)
 	list_init(&t->donations);
 	t->magic = THREAD_MAGIC;
 	list_push_back(&threads, &t->threads_elem);
+	sema_init(&t->wait_childexit, 0);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
