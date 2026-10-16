@@ -50,7 +50,7 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
-	/* Create a new thread to execute FILE_NAME. */
+	/* Create a new thread to execute FILE_NAME. 스레드 생성실패 */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
@@ -176,7 +176,7 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
-	/* And then load the binary */
+	/* And then load the binary 로드 반환*/
 	success = load (file_name, &_if);
 
 	/* If load failed, quit. */
@@ -325,6 +325,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
+	char *str_copy;
 	off_t file_ofs;
 	bool success = false;
 	int i;
@@ -416,6 +417,15 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	
+	 /* 스택 문자열 공간 복사*/
+	 str_copy = palloc_get_page(0);
+	if(str_copy == NULL){
+		return false;
+	}
+	strlcpy(str_copy,file_name,PGSIZE);
+
+
 
 	success = true;
 
