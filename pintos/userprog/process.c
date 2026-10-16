@@ -27,45 +27,45 @@ static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
 static void __do_fork(void *);
 
-/* General process initializer for initd and other process. */
+/* initd와 그 외의 프로세스들을 위한 General ` initializer 입니다. */
 static void
 process_init(void)
 {
 	struct thread *current = thread_current();
 }
 
-/* Starts the first userland program, called "initd", loaded from FILE_NAME.
- * The new thread may be scheduled (and may even exit)
- * before process_create_initd() returns. Returns the initd's
- * thread id, or TID_ERROR if the thread cannot be created.
- * Notice that THIS SHOULD BE CALLED ONCE. */
+/* FILE_NAME에서 로드된 “initd”라는 첫 번째 사용자 공간 프로그램을 시작합니다.
+ * process_create_initd()가 반환되기 전에
+ * 새 스레드가 스케줄링되거나(심지어 종료될 수도 있음)
+ * initd의 스레드 ID를 반환하며, 스레드를 생성할 수 없는 경우
+ * TID_ERROR를 반환합니다.
+ * 이 함수는 한 번만 호출되어야 한다는 점에 유의하십시오. */
 tid_t process_create_initd(const char *file_name)
 {
 	char *fn_copy;
 	tid_t tid;
 
-	/* Make a copy of FILE_NAME.
-	 * Otherwise there's a race between the caller and load(). */
+	/* FILE_NAME의 복사본 생성.
+	 * 그렇지 않으면 호출자와 load() 간에 경합이 발생하기 때문. */
 	fn_copy = palloc_get_page(0);
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy(fn_copy, file_name, PGSIZE);
 
-	/* Create a new thread to execute FILE_NAME. */
+	/* FILE_NAME을 실행할 새 스레드를 생성 */
 	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page(fn_copy);
 	return tid;
 }
 
-/* A thread function that launches first user process. */
+/* 첫 번째 사용자 프로세스를 시작하는 스레드 함수입니다. */
 static void
 initd(void *f_name)
 {
 #ifdef VM
 	supplemental_page_table_init(&thread_current()->spt);
 #endif
-
 	process_init();
 
 	if (process_exec(f_name) < 0)
@@ -168,6 +168,14 @@ error:
 int process_exec(void *f_name)
 {
 	char *file_name = f_name;
+	char *token, *save_ptr;
+
+	/* 20개 제한의 인수 */
+	char *argv[30] = {
+		NULL,
+	};
+
+	int argc;
 	bool success;
 
 	/* 스레드 구조체에서는 intr_frame을 사용할 수 없습니다.
@@ -178,18 +186,38 @@ int process_exec(void *f_name)
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	/* We first kill the current context */
+	/* Command Line Tokenizing */
+	argc = 0;
+	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+	{
+		if (argc == 30)
+		{
+			palloc_free_page(file_name);
+			return -1;
+		}
+		argv[argc++] = token;
+	}
+	argv[argc] = NULL;
+
+	/* 공백이나 빈 입력 시 */
+	if (!argc)
+	{
+		palloc_free_page(file_name);
+		return -1;
+	}
+
+	/* 현재 문맥 상태 정리 */
 	process_cleanup();
 
-	/* And then load the binary */
-	success = load(file_name, &_if);
+	/* 바이너리 새로 로드 */
+	success = load(argv[0], &_if);
 
-	/* If load failed, quit. */
+	/* 로드 실패 시 quit */
 	palloc_free_page(file_name);
 	if (!success)
 		return -1;
 
-	/* Start switched process. */
+	/* 전환된 프로세스 시작 */
 	do_iret(&_if);
 	NOT_REACHED();
 }
@@ -203,8 +231,8 @@ int process_exec(void *f_name)
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
-int
-process_wait (tid_t child_tid) {
+int process_wait(tid_t child_tid)
+{
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
@@ -222,7 +250,7 @@ void process_exit(void)
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 	sema_up(&(thread_current()->wait_childexit));
- 	process_cleanup ();
+	process_cleanup();
 }
 
 /* Free the current process's resources. */
@@ -427,7 +455,6 @@ load(const char *file_name, struct intr_frame *if_)
 	/* Entry 설정 */
 	if_->rip = ehdr.e_entry;
 
-	/* 인자 전달 */
 	success = true;
 
 done:
