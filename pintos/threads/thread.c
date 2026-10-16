@@ -51,7 +51,7 @@ static long long user_ticks;   /* # of timer ticks in user programs. */
 
 /* Scheduling. */
 #define TIME_SLICE 4		  /* # of timer ticks to give each thread. */
-#define DONATION_DEPTH 8      /* Maximum number of nested lock holders. */
+#define DONATION_DEPTH 8	  /* Maximum number of nested lock holders. */
 static unsigned thread_ticks; /* # of timer ticks since last yield. */
 
 /* If false (default), use round-robin scheduler.
@@ -112,11 +112,11 @@ void thread_init(void)
 	lgdt(&gdt_ds);
 
 	/* Init the globla thread context */
-	lock_init (&tid_lock);
-	list_init (&threads);
-	list_init (&ready_list);
-	list_init (&sleep_list);
-	list_init (&destruction_req);
+	lock_init(&tid_lock);
+	list_init(&threads);
+	list_init(&ready_list);
+	list_init(&sleep_list);
+	list_init(&destruction_req);
 
 	load_avg = int_to_fixed(0);
 
@@ -148,37 +148,43 @@ void thread_start(void)
 void thread_tick(void)
 {
 	struct thread *t = thread_current();
-	
-	if(thread_mlfqs){
+
+	if (thread_mlfqs)
+	{
 		/**
-		 * Thread priority is calculated initially at thread initialization. 
-		 * It is also recalculated once every fourth clock tick, for every thread. 
+		 * Thread priority is calculated initially at thread initialization.
+		 * It is also recalculated once every fourth clock tick, for every thread.
 		 * In either case, it is determined by the formula:
 		 * priority = PRI_MAX - (recent_cpu / 4) - (nice * 2)
 		 */
 		struct thread *t = thread_current();
 		t->recent_cpu += int_to_fixed(t != idle_thread);
-		if(timer_ticks()%TIMER_FREQ==0){
+		if (timer_ticks() % TIMER_FREQ == 0)
+		{
 			int ready_threads = thread_current() != idle_thread;
-			for(struct list_elem *element = list_begin(&ready_list);
-				element != list_tail(&ready_list);
-				element = list_next(element)){
+			for (struct list_elem *element = list_begin(&ready_list);
+				 element != list_tail(&ready_list);
+				 element = list_next(element))
+			{
 				ready_threads++;
 			}
-			load_avg = fixed_mul(int_div(59,60),load_avg) + (int_div(1,60) * ready_threads);
-			for(struct list_elem *element = list_begin(&threads);
-				element != list_tail(&threads);
-				element = list_next(element)){
+			load_avg = fixed_mul(int_div(59, 60), load_avg) + (int_div(1, 60) * ready_threads);
+			for (struct list_elem *element = list_begin(&threads);
+				 element != list_tail(&threads);
+				 element = list_next(element))
+			{
 				struct thread *t = list_entry(element, struct thread, threads_elem);
-				t->recent_cpu = fixed_mul(fixed_div(2*load_avg,(2*load_avg+int_to_fixed(1))),t->recent_cpu) + int_to_fixed(t->nice);
+				t->recent_cpu = fixed_mul(fixed_div(2 * load_avg, (2 * load_avg + int_to_fixed(1))), t->recent_cpu) + int_to_fixed(t->nice);
 			}
 		}
-		if(timer_ticks()%4==0){
-			for(struct list_elem *element = list_begin(&threads);
-				element != list_tail(&threads);
-				element = list_next(element)){
+		if (timer_ticks() % 4 == 0)
+		{
+			for (struct list_elem *element = list_begin(&threads);
+				 element != list_tail(&threads);
+				 element = list_next(element))
+			{
 				struct thread *t = list_entry(element, struct thread, threads_elem);
-				t->eff_priority = PRI_MAX-(t->nice)*2-fixed_to_int(t->recent_cpu/4);
+				t->eff_priority = PRI_MAX - (t->nice) * 2 - fixed_to_int(t->recent_cpu / 4);
 			}
 		}
 	}
@@ -197,7 +203,6 @@ void thread_tick(void)
 		// kernel_ticks: 일반 커널 스레드가 실행 중이던 틱 수.
 		// 즉 CPU가 실제로 일한 시간
 		kernel_ticks++;
-
 
 	/* Enforce preemption. */
 	// 선점: 지금 스레드가 4틱 연속으로 썼으면 양보시킴
@@ -286,9 +291,8 @@ void thread_block(void)
 
 bool priority_first(const struct list_elem *elem, const struct list_elem *e, void *aux UNUSED)
 {
-	size_t offset = aux ? *(size_t *) aux : offsetof(struct thread, elem);
-	return ((struct thread *)((char *)elem - offset))->eff_priority
-	> ((struct thread *)((char *)e - offset))->eff_priority;
+	size_t offset = aux ? *(size_t *)aux : offsetof(struct thread, elem);
+	return ((struct thread *)((char *)elem - offset))->eff_priority > ((struct thread *)((char *)e - offset))->eff_priority;
 }
 
 /* Yield only after the caller has completed its atomic state update.
@@ -322,7 +326,7 @@ void thread_refresh_priority(struct thread *t)
 
 	t->eff_priority = t->priority;
 	for (struct list_elem *e = list_begin(&t->donations);
-	     e != list_end(&t->donations); e = list_next(e))
+		 e != list_end(&t->donations); e = list_next(e))
 	{
 		struct thread *donor = list_entry(e, struct thread, donator_elem);
 		if (donor->eff_priority > t->eff_priority)
@@ -362,8 +366,8 @@ void thread_unblock(struct thread *t)
 
 	ASSERT(is_thread(t));
 
-	old_level = intr_disable ();
-	ASSERT (t->status == THREAD_BLOCKED);
+	old_level = intr_disable();
+	ASSERT(t->status == THREAD_BLOCKED);
 	list_insert_ordered(&ready_list, &t->elem, priority_first, NULL);
 	t->status = THREAD_READY;
 	intr_set_level(old_level);
@@ -437,7 +441,7 @@ void thread_yield(void)
 
 /* Ordered wakeup time comparison; equal wakeup times keep FIFO order. */
 static bool wake_less(const struct list_elem *elem,
-                      const struct list_elem *e, void *aux UNUSED)
+					  const struct list_elem *e, void *aux UNUSED)
 {
 	int64_t cur_wakeup_tick = list_entry(elem, struct thread, elem)->wakeup_tick;
 	int64_t target_wakeup_tick = list_entry(e, struct thread, elem)->wakeup_tick;
@@ -473,7 +477,6 @@ void thread_wakeup(int64_t ticks)
 
 		list_pop_front(&sleep_list);
 		thread_unblock(t);
-
 	}
 	thread_preempt();
 }
@@ -513,13 +516,13 @@ int thread_get_nice(void)
 /* Returns 100 times the system load average. */
 int thread_get_load_avg(void)
 {
-	return fixed_to_int(load_avg*100);
+	return fixed_to_int(load_avg * 100);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int thread_get_recent_cpu(void)
 {
-	return fixed_to_int(thread_current()->recent_cpu*100);
+	return fixed_to_int(thread_current()->recent_cpu * 100);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
