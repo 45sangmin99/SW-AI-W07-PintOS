@@ -338,13 +338,13 @@ load(const char *file_name, struct intr_frame *if_)
 	bool success = false;
 	int i;
 
-	/* Allocate and activate page directory. */
+	/* Page Directory 할당 및 활성화 */
 	t->pml4 = pml4_create();
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate(thread_current());
 
-	/* Open executable file. */
+	/* 실행 파일 열기 */
 	file = filesys_open(file_name);
 	if (file == NULL)
 	{
@@ -352,7 +352,7 @@ load(const char *file_name, struct intr_frame *if_)
 		goto done;
 	}
 
-	/* Read and verify executable header. */
+	/* executable header를 읽고 검증 */
 	if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 0x3E // amd64
 		|| ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Phdr) || ehdr.e_phnum > 1024)
 	{
@@ -360,7 +360,7 @@ load(const char *file_name, struct intr_frame *if_)
 		goto done;
 	}
 
-	/* Read program headers. */
+	/* 프로그램 헤더를 읽기 */
 	file_ofs = ehdr.e_phoff;
 	for (i = 0; i < ehdr.e_phnum; i++)
 	{
@@ -418,15 +418,14 @@ load(const char *file_name, struct intr_frame *if_)
 		}
 	}
 
-	/* Set up stack. */
+	/* 사용자 스택 설정 */
 	if (!setup_stack(if_))
 		goto done;
 
-	/* Start address. */
+	/* Entry 설정 */
 	if_->rip = ehdr.e_entry;
 
 	/* 인자 전달 */
-
 	success = true;
 
 done:
