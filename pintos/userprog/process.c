@@ -184,6 +184,8 @@ int process_exec(void *f_name)
 	int argc;
 	size_t len;
 	size_t strings_bytes;
+	size_t padding_bytes;
+	size_t parray_bytes;
 	bool success;
 
 	/* 스레드 구조체에서는 intr_frame을 사용할 수 없습니다.
@@ -216,12 +218,16 @@ int process_exec(void *f_name)
 		return -1;
 	}
 
-	/* 페이지 크기 초과 시 (총 문자열 길이 + 포인터 배열 크기 + 가짜 주소 크기) */
-	if ((ROUND_UP(strings_bytes, 8) + (argc + 1) * sizeof(char *) + sizeof(uintptr_t)) > PGSIZE)
+	parray_bytes = (argc + 1) * sizeof(char *);
+	padding_bytes = ROUND_UP(strings_bytes + parray_bytes, 16) - (strings_bytes + parray_bytes);
+
+	/* 페이지 크기 초과 시 ((총 문자열 길이 + 패딩 크기 + 포인터 배열 크기) + 가짜 주소 크기) */
+	if ((ROUND_UP(strings_bytes + parray_bytes, 16) + sizeof(uintptr_t)) > PGSIZE)
 	{
 		palloc_free_page(file_name);
 		return -1;
 	}
+
 	/* 현재 문맥 상태 정리 */
 	process_cleanup();
 
@@ -236,21 +242,18 @@ int process_exec(void *f_name)
 	}
 
 	/* 사용자 스택 설정 */
-	len = 0;
-	strings_bytes = 0;
 	for (int i = 0; i < argc; i++)
 	{
 		len = strlen(argv[i]) + 1;
 
 		_if.rsp -= len;
 		user_argv[i] = memcpy((void *)_if.rsp, argv[i], len);
-
-		strings_bytes += len;
 	}
-	/* 8바이트 정렬 */
-	_if.rsp = ROUND_DOWN(_if.rsp, 8);
 
-	/* 사용자 argv를 복사 */
+	/* 패딩 설정 */
+	_if.rsp -= padding_bytes;
+
+	/* 사용자 argv 설정 */
 	_if.rsp -= (argc + 1) * sizeof(char *);
 	user_argv_p = memcpy((void *)_if.rsp, user_argv, (argc + 1) * sizeof(char *));
 
