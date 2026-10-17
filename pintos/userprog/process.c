@@ -170,12 +170,20 @@ int process_exec(void *f_name)
 	char *file_name = f_name;
 	char *token, *save_ptr;
 
-	/* 20개 제한의 인수 */
-	char *argv[30] = {
+	/* 30개 제한의 인수 */
+	char *argv[31] = {
 		NULL,
 	};
 
+	/* 임시 사용자 argv */
+	char *user_argv[31] = {
+		NULL,
+	};
+	void *user_argv_p = NULL;
+
 	int argc;
+	size_t len;
+	size_t strings_bytes;
 	bool success;
 
 	/* 스레드 구조체에서는 intr_frame을 사용할 수 없습니다.
@@ -186,18 +194,20 @@ int process_exec(void *f_name)
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	/* Command Line Tokenizing */
+	/* Command Line 토큰화 */
 	argc = 0;
+	strings_bytes = 0;
 	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
 	{
+		/* 30개 초과 시 실패 처리 */
 		if (argc == 30)
 		{
 			palloc_free_page(file_name);
 			return -1;
 		}
+		strings_bytes += strlen(token) + 1;
 		argv[argc++] = token;
 	}
-	argv[argc] = NULL;
 
 	/* 공백이나 빈 입력 시 */
 	if (!argc)
@@ -206,6 +216,12 @@ int process_exec(void *f_name)
 		return -1;
 	}
 
+	/* 페이지 크기 초과 시 (총 문자열 길이 + 포인터 배열 크기 + 가짜 주소 크기) */
+	if ((ROUND_UP(strings_bytes, 8) + (argc + 1) * sizeof(char *) + sizeof(uintptr_t)) > PGSIZE)
+	{
+		palloc_free_page(file_name);
+		return -1;
+	}
 	/* 현재 문맥 상태 정리 */
 	process_cleanup();
 
@@ -213,9 +229,40 @@ int process_exec(void *f_name)
 	success = load(argv[0], &_if);
 
 	/* 로드 실패 시 quit */
-	palloc_free_page(file_name);
 	if (!success)
+	{
+		palloc_free_page(file_name);
 		return -1;
+	}
+
+	/* 사용자 스택 설정 */
+	len = 0;
+	strings_bytes = 0;
+	for (int i = 0; i < argc; i++)
+	{
+		len = strlen(argv[i]) + 1;
+
+		_if.rsp -= len;
+		user_argv[i] = memcpy((void *)_if.rsp, argv[i], len);
+
+		strings_bytes += len;
+	}
+	/* 8바이트 정렬 */
+	_if.rsp = ROUND_DOWN(_if.rsp, 8);
+
+	/* 사용자 argv를 복사 */
+	_if.rsp -= (argc + 1) * sizeof(char *);
+	user_argv_p = memcpy((void *)_if.rsp, user_argv, (argc + 1) * sizeof(char *));
+
+	/* 매개변수 설정 */
+	_if.R.rdi = argc;
+	_if.R.rsi = (uintptr_t)user_argv_p;
+
+	/* 가짜 주소 설정 */
+	_if.rsp -= 8;
+	memset((void *)_if.rsp, 0, 8);
+
+	palloc_free_page(file_name);
 
 	/* 전환된 프로세스 시작 */
 	do_iret(&_if);
@@ -448,7 +495,7 @@ load(const char *file_name, struct intr_frame *if_)
 		}
 	}
 
-	/* 사용자 스택 설정 */
+	/* 사용자 스택 할당 */
 	if (!setup_stack(if_))
 		goto done;
 
