@@ -325,10 +325,16 @@ load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
-	char *str_copy = NULL; /* 메모리 복사 */
+	char *str_copy = NULL; /* 메모리 공간 복사 */
+	char *str_copy2 = NULL; /* 배열주소(두번순회)*/
 	char *str_token; /* 토큰주소 저장 */
 	char *save_ptr; /* 다음토큰 위치기억 */
-	char *str_search = NULL; /* 실행파일 찾기 */
+	char **argv_addr; /* 시작주소 기억 */
+	int argc = 0; /* 인자 */
+	char **argv = NULL; /* 문자열배열 주소*/
+	int arg_idx = 0; /* 인자배열 위치*/
+	size_t str_len; /* 문자열 길이 */
+	size_t argv_size; /* 배열전체 크기*/
 	off_t file_ofs;
 	bool success = false;
 	int i;
@@ -347,15 +353,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 	strlcpy(str_copy,file_name,PGSIZE);
 
-	/* 실행파일 찾기 */
-	str_search = palloc_get_page(0);
-	if(str_search == NULL){
-		goto done;
-	}
-	strlcpy(str_search,file_name,PGSIZE);
 
 	/* 실행파일 추출 */
-	str_token = strtok_r(str_search," ",&save_ptr);
+	str_token = strtok_r(str_copy," ",&save_ptr);
 	if(str_token == NULL){
 		goto done;
 	}
@@ -433,12 +433,76 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Set up stack. */
+	/* 스택 인자파싱 및 넣기 */
 	if (!setup_stack (if_))
 		goto done;
 
-	/* Start address. */
-	if_->rip = ehdr.e_entry;
+	/* 인자 개수세기*/
+	while (str_token != NULL){
+		argc++;
+		str_token = strtok_r(NULL," ",&save_ptr);
 
+	}
+	/* 배열 인자 주소 담기 */
+	argv = malloc(sizeof(char *)* (argc+1));
+	if(argv != NULL){
+		argv[argc] = NULL; /* 배열마지막 원소 NULL 저장*/
+	}else{
+		goto done;
+	}
+
+
+	/* 두번째 순회용 파싱 */
+	str_copy2 = palloc_get_page(0);
+	if(str_copy2 == NULL){
+		goto done;
+	}
+
+	strlcpy(str_copy2,file_name,PGSIZE);
+	str_token = strtok_r(str_copy2," ",&save_ptr);
+	if(str_token == NULL){
+		goto done;
+	}
+
+
+	str_len = strlen(str_token);
+	if_->rsp -= str_len+1;
+	memcpy(if_->rsp,str_token,str_len +1);
+
+	/* 스택 복사한 첫번째 문자열 시작주소 저장*/
+	argv[0] = if_->rsp;
+	str_token = strtok_r(NULL," ",&save_ptr);
+	arg_idx = 1;
+	
+	while (str_token != NULL){
+		str_len = strlen(str_token);
+		if_->rsp -= str_len+1;
+		memcpy(if_->rsp,str_token,str_len +1);
+		argv[arg_idx] = if_->rsp;
+		arg_idx ++;
+		str_token = strtok_r(NULL," ",&save_ptr);
+	}
+
+	/* 정수형 타입 포인터타입 변환 8바이트 정렬*/
+	if_->rsp = (void *)ROUND_DOWN((uintptr_t)if_->rsp,sizeof(char *));
+	argv[argc] = NULL;
+
+	/* 사용자 스택 복사된 argv 배열 시작주소*/
+	argv_size = sizeof(char *) * (argc+1);
+	if_->rsp = if_->rsp - argv_size;
+	memcpy(if_->rsp,argv,argv_size);
+	
+	argv_addr = if_->rsp;
+	
+	/* 8바이트 낮춰서 가짜 반환주소확보*/
+	if_->rsp -= sizeof(uint64_t);
+	*(uint64_t *) if_->rsp = 0;
+
+	if_->R.rdi = argc;
+	if_->R.rsi = argv_addr;
+
+	if_->rip = ehdr.e_entry;
+	
 	success = true;
 
 done:
@@ -448,12 +512,13 @@ done:
 	if(str_copy != NULL){
 		palloc_free_page(str_copy);
 	}
-	if(str_search != NULL){
-		palloc_free_page(str_search);
+	if(str_copy2 != NULL){
+		palloc_free_page(str_copy2);
 	}
 	if(file != NULL){
 		file_close (file);
 	}
+	free(argv);
 	return success;
 }
 
