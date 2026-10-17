@@ -242,7 +242,7 @@ tid_t thread_create(const char *name, int priority,
 
 	enum intr_level old_level = intr_disable();
 
-	/* Allocate thread. */
+	/* 스레드 할당 */
 	t = palloc_get_page(PAL_ZERO);
 	if (t == NULL)
 	{
@@ -250,7 +250,7 @@ tid_t thread_create(const char *name, int priority,
 		return TID_ERROR;
 	}
 
-	/* Initialize thread. */
+	/* 스레드 초기화 */
 	init_thread(t, name, priority);
 	tid = t->tid = allocate_tid();
 
