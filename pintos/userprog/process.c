@@ -325,7 +325,10 @@ load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
-	char *str_copy;
+	char *str_copy = NULL; /* 메모리 복사 */
+	char *str_token; /* 토큰주소 저장 */
+	char *save_ptr; /* 다음토큰 위치기억 */
+	char *str_search = NULL; /* 실행파일 찾기 */
 	off_t file_ofs;
 	bool success = false;
 	int i;
@@ -336,8 +339,29 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+
+	/* 스택 문자열 공간 복사*/
+	str_copy = palloc_get_page(0);
+	if(str_copy == NULL){
+		goto done;
+	}
+	strlcpy(str_copy,file_name,PGSIZE);
+
+	/* 실행파일 찾기 */
+	str_search = palloc_get_page(0);
+	if(str_search == NULL){
+		goto done;
+	}
+	strlcpy(str_search,file_name,PGSIZE);
+
+	/* 실행파일 추출 */
+	str_token = strtok_r(str_search," ",&save_ptr);
+	if(str_token == NULL){
+		goto done;
+	}
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (str_token);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
@@ -415,23 +439,21 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
-	
-	 /* 스택 문자열 공간 복사*/
-	 str_copy = palloc_get_page(0);
-	if(str_copy == NULL){
-		return false;
-	}
-	strlcpy(str_copy,file_name,PGSIZE);
-
-
-
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	/* 메모리 할당일경우 페이지 해제 (자원정리) */
+
+	if(str_copy != NULL){
+		palloc_free_page(str_copy);
+	}
+	if(str_search != NULL){
+		palloc_free_page(str_search);
+	}
+	if(file != NULL){
+		file_close (file);
+	}
 	return success;
 }
 
