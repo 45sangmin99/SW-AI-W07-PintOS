@@ -61,6 +61,27 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			}
 		}
 	}
+	if(f->R.rax == SYS_OPEN){
+		struct file * open_file = filesys_open((char *)f->R.rdi);
+		int new_fd = 2;
+		if(open_file == NULL){
+			f->R.rax = -1;
+			return;
+		}
+	
+		for(; new_fd <= 63; new_fd++){
+			if(t->fd_table[new_fd] == NULL){
+				t->fd_table[new_fd] = open_file;
+				f->R.rax = new_fd;
+				return;
+			}
+		}
+		file_close(open_file);
+		f->R.rax = -1;
+		return;
+
+	}
+
 	// printf ("system call!\n");
 	// thread_exit ();
 }
