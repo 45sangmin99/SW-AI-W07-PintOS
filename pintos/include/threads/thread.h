@@ -63,7 +63,9 @@ typedef int tid_t;
  *
  * The `elem' member can be used in the run queue, a semaphore
  * wait list, or the sleep list.  These uses are mutually exclusive. */
-struct thread {
+
+
+ struct thread {
     /* Owned by thread.c. */
     tid_t tid;                          /* Thread identifier. */
     enum thread_status status;          /* Thread state. */
@@ -80,9 +82,13 @@ struct thread {
     struct list_elem elem;              /* List element. */
     struct list_elem threads_elem;
 
+
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint64_t *pml4;                     /* Page map level 4 */
+    struct file *fd_table[64]; /* 파일디스크럽터 고정크기배열 64개*/
+    
 #endif
 #ifdef VM
     /* Table for whole virtual memory owned by thread. */
@@ -134,5 +140,6 @@ bool priority_first(const struct list_elem *, const struct list_elem *, void *au
 void thread_preempt(void);
 void thread_refresh_priority(struct thread *);
 void thread_donate_priority(void);
+
 
 #endif /* threads/thread.h */

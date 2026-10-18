@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/malloc.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -65,7 +66,6 @@ initd (void *f_name) {
 #endif
 
 	process_init ();
-
 	if (process_exec (f_name) < 0)
 		PANIC("Fail to launch initd\n");
 	NOT_REACHED ();
@@ -320,6 +320,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
@@ -363,7 +364,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Open executable file. */
 	file = filesys_open (str_token);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
 
@@ -375,7 +375,6 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
 		goto done;
 	}
 
@@ -436,7 +435,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* 스택 인자파싱 및 넣기 */
 	if (!setup_stack (if_))
 		goto done;
-
 	/* 인자 개수세기*/
 	while (str_token != NULL){
 		argc++;
@@ -467,18 +465,18 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	str_len = strlen(str_token);
 	if_->rsp -= str_len+1;
-	memcpy(if_->rsp,str_token,str_len +1);
+	memcpy((void *)if_->rsp,str_token,str_len +1);
 
 	/* 스택 복사한 첫번째 문자열 시작주소 저장*/
-	argv[0] = if_->rsp;
+	argv[0] = (char *)if_->rsp;
 	str_token = strtok_r(NULL," ",&save_ptr);
 	arg_idx = 1;
 	
 	while (str_token != NULL){
 		str_len = strlen(str_token);
 		if_->rsp -= str_len+1;
-		memcpy(if_->rsp,str_token,str_len +1);
-		argv[arg_idx] = if_->rsp;
+		memcpy((void *)if_->rsp,str_token,str_len +1);
+		argv[arg_idx] = (char *)if_->rsp;
 		arg_idx ++;
 		str_token = strtok_r(NULL," ",&save_ptr);
 	}
@@ -490,21 +488,19 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* 사용자 스택 복사된 argv 배열 시작주소*/
 	argv_size = sizeof(char *) * (argc+1);
 	if_->rsp = if_->rsp - argv_size;
-	memcpy(if_->rsp,argv,argv_size);
+	memcpy((void *)if_->rsp,argv,argv_size);
 	
-	argv_addr = if_->rsp;
+	argv_addr = (char **)if_->rsp;
 	
 	/* 8바이트 낮춰서 가짜 반환주소확보*/
 	if_->rsp -= sizeof(uint64_t);
 	*(uint64_t *) if_->rsp = 0;
 
 	if_->R.rdi = argc;
-	if_->R.rsi = argv_addr;
+	if_->R.rsi = (uintptr_t)argv_addr;
 
 	if_->rip = ehdr.e_entry;
-	
 	success = true;
-
 done:
 	/* We arrive here whether the load is successful or not. */
 	/* 메모리 할당일경우 페이지 해제 (자원정리) */

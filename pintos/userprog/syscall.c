@@ -7,9 +7,11 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "filesys/file.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
 
 /* System call.
  *
@@ -40,7 +42,25 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
+	uint64_t fd = f->R.rdi;
+	const char * buffer = f->R.rsi;
+	size_t size = f->R.rdx;
+	struct thread * t = thread_current();
+
 	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+	if(f->R.rax == SYS_WRITE){
+		if(fd == 1){
+			putbuf(buffer , size);
+			f->R.rax = size;
+			return;
+		}
+		if(fd<64){
+			if(t->fd_table[fd] != NULL){
+    			f->R.rax = file_write(t->fd_table[fd],buffer, size);
+				return;
+			}
+		}
+	}
+	// printf ("system call!\n");
+	// thread_exit ();
 }
