@@ -51,8 +51,11 @@ void syscall_handler(struct intr_frame *f)
 		}
 		break;
 	case SYS_EXIT:
-		printf("%s: exit(%d)\n",thread_current()->name ,f->R.rdi);
+		printf("%s: exit(%d)\n",thread_name() ,f->R.rdi);
 		thread_exit();
+		return;
+	case SYS_FORK:
+		process_fork(thread_name(),f);
 		return;
 	default:
 		break;
