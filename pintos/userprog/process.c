@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/malloc.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -26,6 +27,12 @@ static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
 static void __do_fork(void *);
+struct fork_p_args {
+    struct thread *parent; //부모스레드
+    struct intr_frame *parent_if; //fork()인자로 받은것
+	struct semaphore sema;
+	bool success; // 자식복제 성공여부
+};
 
 /* General process initializer for initd and other process. */
 static void
@@ -77,16 +84,38 @@ initd(void *f_name)
  * TID_ERROR if the thread cannot be created. */
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
-	/* Clone current thread to new thread.*/
-	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
-	struct thread *child = thread_get_by_tid(child_tid);
-	struct intr_frame child_if = *if_;
-	
-	child_if.R.rax = 0x0; 
+	struct fork_p_args *args;	
+	/* fork_p_args 메모리 할당 검사 */
+	args = malloc (sizeof *args);
+	if(args == NULL){
+		return TID_ERROR;
+	}
+	/* 부모스레드 & 인터럽트 프레임포인터 저장*/
+	args->parent = thread_current();
+	args->parent_if = if_;
+
+	/* 부모 프레임 복사 끝내기전에 진행 x*/
+	sema_init(&args->sema, 0);
+
+	/* args aux로 전달 하고 자식 얻기 */
+	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, args);
+
+	/* child_tid 실패검사 */
+	if(child_tid == TID_ERROR){
+		free(args);
+		return TID_ERROR;
+	}
+	/* 부모가 자식 성공여부 확인 */
+	sema_down(&args->sema);
+	if(args->success == true){
+		free(args);
+	}else{
+		free(args);
+		return TID_ERROR;
+	}
+
 	if_->R.rax = child_tid;
 	
-	thread_current()->tf = *if_;
-	child->tf = child_if;
 	return child_tid;
 }
 
@@ -103,8 +132,10 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
-	if(thread_name() == "main")return 0;
-
+	/* va 가상주소 확인 */
+	if (!is_user_vaddr(va)){
+    	return true;
+	}
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page(parent->pml4, va);
 
@@ -137,14 +168,15 @@ static void
 __do_fork(void *aux)
 {
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *)aux;
+	struct fork_p_args *args = aux;
+	struct thread *parent = args->parent;
+	struct intr_frame *parent_if = args->parent_if;
 	struct thread *current = thread_current();
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
-	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
 	memcpy(&if_, parent_if, sizeof(struct intr_frame));
+	if_.R.rax = 0;
 
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
@@ -168,11 +200,16 @@ __do_fork(void *aux)
 	 * TODO:       the resources of parent.*/
 
 	process_init();
-
+	
+	/* 부모한테 성공&실패여부 알리기 */
 	/* Finally, switch to the newly created process. */
-	if (succ)
-		do_iret(&if_);
+	args->success = true;
+	sema_up(&args->sema);
+	do_iret(&if_);
+
 error:
+	args->success = false;
+	sema_up(&args->sema);
 	thread_exit();
 }
 
