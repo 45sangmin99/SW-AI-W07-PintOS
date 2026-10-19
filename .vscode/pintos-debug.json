@@ -1,4 +1,0 @@
-{
-    "test": "mlfqs-load-60",
-    "icount": "shift=8,align=off,sleep=off"
-}

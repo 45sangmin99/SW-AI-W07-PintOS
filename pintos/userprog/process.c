@@ -346,6 +346,49 @@ load(const char *file_name, struct intr_frame *if_)
 		goto done;
 	process_activate(thread_current());
 
+	/* 사용자 스택 설정 */
+	if (!setup_stack(if_))
+		goto done;
+	
+	if_->R.rsi = USER_STACK;
+	if_->rsp = USER_STACK;
+	
+	for(char *p = file_name; p != file_name + strlen(file_name); p++){
+		if(*p == ' ' && *(p+1) == ' '){
+			memmove(p,p+1,file_name + strlen(file_name)-p);
+			*(char*)(file_name + strlen(file_name)) = '\0';
+		}
+	}
+
+	char *p = file_name + strlen(file_name) + 1;
+	char *temp = p;
+	int argc = 0;
+	for(;;p--){
+		if(p == file_name||*(p-1)==' '){
+			argc ++;
+			if_->R.rsi -= temp - p;
+			memcpy(if_->R.rsi, p, temp-p);
+			if(p==file_name){
+				strlcpy(thread_current()->name, file_name, temp-p);
+				break;
+			}
+			temp = p;
+			*(p-1) = '\0';
+		}
+	}
+	if_->rsp = if_->R.rsi;
+	if_->R.rsi = ROUND_DOWN(if_->R.rsi,sizeof(char *)) - sizeof(char *);
+	*(char **)if_->R.rsi = NULL;
+	if_->R.rdi = argc;
+	for(char *p = USER_STACK-1;;p--){
+		if(p == if_->rsp || *(p-1) == '\0'){
+			if_->R.rsi -= sizeof(char *);
+			*(char **)if_->R.rsi = p;
+			if(p == if_->rsp)break;
+		}
+	}
+	if_->rsp = if_->R.rsi - sizeof(char *);
+
 	/* 실행 파일 열기 */
 	file = filesys_open(file_name);
 	if (file == NULL)
@@ -419,10 +462,6 @@ load(const char *file_name, struct intr_frame *if_)
 			break;
 		}
 	}
-
-	/* 사용자 스택 설정 */
-	if (!setup_stack(if_))
-		goto done;
 
 	/* Entry 설정 */
 	if_->rip = ehdr.e_entry;
