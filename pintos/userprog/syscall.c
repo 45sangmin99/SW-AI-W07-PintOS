@@ -8,6 +8,8 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 
+#include "include/lib/kernel/stdio.h"
+
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
@@ -40,7 +42,22 @@ void syscall_init(void)
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f)
 {
+		
+	switch (f->R.rax)
+	{
+	case SYS_WRITE:
+		if(f->R.rdi == 1){
+			putbuf(f->R.rsi, f->R.rdx);
+		}
+		break;
+	case SYS_EXIT:
+		printf("%s: exit(%d)\n",thread_current()->name ,f->R.rdi);
+		thread_exit();
+		return;
+	default:
+		break;
+	}
 	// TODO: Your implementation goes here.
-	printf("system call!\n");
-	thread_exit();
+	// printf("system call!\n");
+	// thread_exit();
 }
