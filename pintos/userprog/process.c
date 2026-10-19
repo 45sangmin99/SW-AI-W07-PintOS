@@ -82,20 +82,23 @@ initd(void *f_name)
  * TID_ERROR if the thread cannot be created. */
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
-	/* Clone current thread to new thread.*/
+	struct thread *child;
+	struct intr_frame child_if;
 
+	/* 새 자식 스레드를 생성하고, 현재 스레드 컨텍스트를 복사 */
 	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
 	if (child_tid == TID_ERROR)
 		return TID_ERROR;
 
-	struct thread *child = thread_get_by_tid(child_tid);
-	struct intr_frame child_if = *if_;
+	/* 자식 스레드 프레임 설정 */
+	child = thread_get_by_tid(child_tid);
+	child_if = *if_;
 
 	child_if.R.rax = 0x0;
 	if_->R.rax = child_tid;
 
-	thread_current()->tf = *if_;
 	child->tf = child_if;
+
 	return child_tid;
 }
 
