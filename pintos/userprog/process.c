@@ -66,6 +66,11 @@ initd(void *f_name)
 	supplemental_page_table_init(&thread_current()->spt);
 #endif
 
+	/* 첫 실행에서만 명령줄의 인자 부분을 이름에서 제외합니다. */
+	char *space = strchr(thread_current()->name, ' ');
+	if (space != NULL)
+		*space = '\0';
+
 	process_init();
 
 	if (process_exec(f_name) < 0)
@@ -78,13 +83,17 @@ initd(void *f_name)
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
 	/* Clone current thread to new thread.*/
+
 	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
+	if (child_tid == TID_ERROR)
+		return TID_ERROR;
+
 	struct thread *child = thread_get_by_tid(child_tid);
 	struct intr_frame child_if = *if_;
-	
-	child_if.R.rax = 0x0; 
+
+	child_if.R.rax = 0x0;
 	if_->R.rax = child_tid;
-	
+
 	thread_current()->tf = *if_;
 	child->tf = child_if;
 	return child_tid;
@@ -103,7 +112,8 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
-	if(thread_name() == "main")return 0;
+	if (thread_name() == "main")
+		return 0;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page(parent->pml4, va);
@@ -216,8 +226,8 @@ int process_exec(void *f_name)
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
-int
-process_wait (tid_t child_tid) {
+int process_wait(tid_t child_tid)
+{
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
@@ -235,7 +245,7 @@ void process_exit(void)
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 	sema_up(&(thread_current()->wait_childexit));
- 	process_cleanup ();
+	process_cleanup();
 }
 
 /* Free the current process's resources. */
@@ -362,42 +372,49 @@ load(const char *file_name, struct intr_frame *if_)
 	/* 사용자 스택 설정 */
 	if (!setup_stack(if_))
 		goto done;
-	
+
 	if_->R.rsi = USER_STACK;
 	if_->rsp = USER_STACK;
-	
-	for(char *p = file_name; p != file_name + strlen(file_name); p++){
-		if(*p == ' ' && *(p+1) == ' '){
-			memmove(p,p+1,file_name + strlen(file_name)-p);
-			*(char*)(file_name + strlen(file_name)) = '\0';
+
+	for (char *p = file_name; p != file_name + strlen(file_name); p++)
+	{
+		if (*p == ' ' && *(p + 1) == ' ')
+		{
+			memmove(p, p + 1, file_name + strlen(file_name) - p);
+			*(char *)(file_name + strlen(file_name)) = '\0';
 		}
 	}
 
 	char *p = file_name + strlen(file_name) + 1;
 	char *temp = p;
 	int argc = 0;
-	for(;;p--){
-		if(p == file_name||*(p-1)==' '){
-			argc ++;
+	for (;; p--)
+	{
+		if (p == file_name || *(p - 1) == ' ')
+		{
+			argc++;
 			if_->R.rsi -= temp - p;
-			memcpy(if_->R.rsi, p, temp-p);
-			if(p==file_name){
-				strlcpy(thread_current()->name, file_name, temp-p);
+			memcpy(if_->R.rsi, p, temp - p);
+			if (p == file_name)
+			{
 				break;
 			}
 			temp = p;
-			*(p-1) = '\0';
+			*(p - 1) = '\0';
 		}
 	}
 	if_->rsp = if_->R.rsi;
-	if_->R.rsi = ROUND_DOWN(if_->R.rsi,sizeof(char *)) - sizeof(char *);
+	if_->R.rsi = ROUND_DOWN(if_->R.rsi, sizeof(char *)) - sizeof(char *);
 	*(char **)if_->R.rsi = NULL;
 	if_->R.rdi = argc;
-	for(char *p = USER_STACK-1;;p--){
-		if(p == if_->rsp || *(p-1) == '\0'){
+	for (char *p = USER_STACK - 1;; p--)
+	{
+		if (p == if_->rsp || *(p - 1) == '\0')
+		{
 			if_->R.rsi -= sizeof(char *);
 			*(char **)if_->R.rsi = p;
-			if(p == if_->rsp)break;
+			if (p == if_->rsp)
+				break;
 		}
 	}
 	if_->rsp = if_->R.rsi - sizeof(char *);

@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -7,11 +8,15 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "userprog/process.h"
+#include "threads/palloc.h"
 
 #include "include/lib/kernel/stdio.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
+
+static void exit_helper(const char *name, int status);
 
 /* System call.
  *
@@ -42,25 +47,74 @@ void syscall_init(void)
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f)
 {
-		
 	switch (f->R.rax)
 	{
 	case SYS_WRITE:
-		if(f->R.rdi == 1){
+		if (f->R.rdi == 1)
 			putbuf(f->R.rsi, f->R.rdx);
-		}
 		break;
 	case SYS_EXIT:
-		printf("%s: exit(%d)\n",thread_name() ,f->R.rdi);
-		thread_exit();
-		return;
+		exit_helper(thread_name(), (int)f->R.rdi);
+		break;
 	case SYS_FORK:
-		process_fork(thread_name(),f);
+		process_fork(thread_name(), f);
 		return;
+	case SYS_EXEC:
+		const char *cmd_line;
+		const char *t_name;
+
+		char *f_name;
+		void *current_page;
+
+		int size;
+
+		t_name = thread_name();
+		cmd_line = (char *)f->R.rdi;
+		/* 유효성 검증 */
+		/* 명령줄이 NULL 인지 */
+		if (cmd_line == NULL)
+			exit_helper(t_name, -1);
+
+		/* 문자열 검증 */
+		size = 0;
+		while (size < PGSIZE)
+		{
+			/* 사용자 공간에 있는지 */
+			if (!is_user_vaddr(cmd_line + size))
+				exit_helper(t_name, -1);
+
+			/* 시작 주소가 페이지에 매핑되어 있는지 */
+			if (pml4_get_page(thread_current()->pml4, cmd_line + size) == NULL)
+				exit_helper(t_name, -1);
+
+			/* 종료 조건 */
+			if (cmd_line[size] == '\0')
+				break;
+			size++;
+		}
+
+		/* 커널 한 페이지 (4096바이트) 안에 들어가는 지 */
+		if (size == PGSIZE)
+			exit_helper(t_name, -1);
+
+		/* 커널 공간 매핑 */
+		f_name = palloc_get_page(0);
+		if (f_name == NULL)
+			exit_helper(t_name, -1);
+
+		/* 인수 전달 */
+		if (process_exec(memcpy(f_name, cmd_line, size + 1)) == -1)
+			exit_helper(t_name, -1);
+		break;
 	default:
 		break;
 	}
-	// TODO: Your implementation goes here.
-	// printf("system call!\n");
-	// thread_exit();
+}
+
+/* 임시 종료 헬퍼 함수입니다.
+ * 추후 커널에서의 종료 계약이 완료되면, 대체할 수 있습니다. */
+static void exit_helper(const char *name, int status)
+{
+	printf("%s: exit(%d)\n", name, status);
+	thread_exit();
 }
