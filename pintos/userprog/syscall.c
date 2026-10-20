@@ -9,6 +9,8 @@
 #include "intrinsic.h"
 
 #include "include/lib/kernel/stdio.h"
+#include "userprog/process.h"
+#include "filesys/filesys.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -45,13 +47,43 @@ void syscall_handler(struct intr_frame *f)
 		
 	switch (f->R.rax)
 	{
+	case SYS_CREATE:
+		if(!f->R.rdi || !is_user_vaddr(f->R.rdi) || !pml4_get_page(thread_current()->pml4, f->R.rdi)){
+			break;
+		}
+		f->R.rax = filesys_create(f->R.rdi, f->R.rsi);
+		return;
+	case SYS_OPEN:{
+		if(!f->R.rdi || !is_user_vaddr(f->R.rdi) || !pml4_get_page(thread_current()->pml4, f->R.rdi)){
+			break;
+		}
+		struct file_descriptor *fd = malloc(sizeof(struct file_descriptor));
+		fd->file = filesys_open(f->R.rdi);
+		fd->fd = fd->file?thread_current()->next_fd++:-1;
+		list_push_back(&thread_current()->file_descriptor_list, &fd->file_descriptor_list_elem);
+		f->R.rax = fd->fd;
+		return;
+	}
+	case SYS_CLOSE:{
+		if(!f->R.rdi)break;
+		struct file_descriptor *fd = find_file_descriptor_by_fd(f->R.rdi);
+		if(!fd)break;
+		f->R.rax = fd->fd;
+		free(fd->file);
+		list_remove(&fd->file_descriptor_list_elem);
+		return;
+	}
 	case SYS_WRITE:
 		if(f->R.rdi == 1){
 			putbuf(f->R.rsi, f->R.rdx);
 		}
-		break;
+		return;
+	case SYS_WAIT:
+		f->R.rax = process_wait(f->R.rdi);
+		return;
 	case SYS_EXIT:
 		printf("%s: exit(%d)\n",thread_name() ,f->R.rdi);
+		if(thread_current()->parent)find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->exit_status = f->R.rdi;
 		thread_exit();
 		return;
 	case SYS_FORK:
@@ -60,6 +92,9 @@ void syscall_handler(struct intr_frame *f)
 	default:
 		break;
 	}
+	f->R.rdi = -1;
+	printf("%s: exit(%d)\n",thread_name() ,f->R.rdi);
+	thread_exit();
 	// TODO: Your implementation goes here.
 	// printf("system call!\n");
 	// thread_exit();

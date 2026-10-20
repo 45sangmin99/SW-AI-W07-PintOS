@@ -78,16 +78,21 @@ initd(void *f_name)
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
 	/* Clone current thread to new thread.*/
-	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
-	struct thread *child = thread_get_by_tid(child_tid);
+	struct child *child_thread = malloc(sizeof(struct child));
 	struct intr_frame child_if = *if_;
+	child_if.R.rax = thread_current(); 
+
+	child_thread->tid = thread_create(if_->R.rdi, PRI_DEFAULT, __do_fork, &child_if);
+	struct thread *child = thread_get_by_tid(child_thread->tid);
+	child->parent = thread_current();
 	
-	child_if.R.rax = 0x0; 
-	if_->R.rax = child_tid;
+	if_->R.rax = child_thread->tid;
 	
-	thread_current()->tf = *if_;
-	child->tf = child_if;
-	return child_tid;
+	// thread_current()->tf = *if_;
+	// child->tf = child_if;
+	list_push_back(&thread_current()->children, &child_thread->child_elem);
+	sema_down(&child->wait);
+	return child_thread->tid;
 }
 
 #ifndef VM
@@ -103,7 +108,7 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
-	if(thread_name() == "main")return 0;
+	if(is_kern_pte(pte))return 1;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page(parent->pml4, va);
@@ -137,14 +142,15 @@ static void
 __do_fork(void *aux)
 {
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *)aux;
 	struct thread *current = thread_current();
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame *parent_if = (struct intr_frame *)aux;
+	struct thread *parent = parent_if->R.rax;
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
 	memcpy(&if_, parent_if, sizeof(struct intr_frame));
+	if_.R.rax = 0x0;
 
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
@@ -171,6 +177,7 @@ __do_fork(void *aux)
 
 	/* Finally, switch to the newly created process. */
 	if (succ)
+		sema_up(&thread_current()->wait);
 		do_iret(&if_);
 error:
 	thread_exit();
@@ -223,7 +230,8 @@ process_wait (tid_t child_tid) {
 	 * XXX:       implementing the process_wait. */
 	struct thread *t = thread_get_by_tid(child_tid);
 	sema_down(&(t->wait_childexit));
-	return -1;
+	find_child_by_tid(&thread_current()->children, child_tid)->exit_status;
+	return find_child_by_tid(&thread_current()->children, child_tid)->exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -235,7 +243,7 @@ void process_exit(void)
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 	sema_up(&(thread_current()->wait_childexit));
- 	process_cleanup ();
+ 	process_cleanup();
 }
 
 /* Free the current process's resources. */

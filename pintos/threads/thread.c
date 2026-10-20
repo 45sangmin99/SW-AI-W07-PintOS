@@ -536,6 +536,27 @@ struct thread *thread_get_by_tid(tid_t tid){
 	NOT_REACHED();
 }
 
+struct child *find_child_by_tid(struct list *children, tid_t tid){
+	for(struct list_elem *element = list_begin(children);
+	element != list_tail(children);
+	element = list_next(element)){
+		if(list_entry(element, struct child, child_elem)->tid == tid){
+			return list_entry(element, struct child, child_elem);
+		}
+	};
+}
+
+struct file_descriptor *find_file_descriptor_by_fd(int fd){
+	for(struct list_elem *element = list_begin(&thread_current()->file_descriptor_list);
+	element != list_tail(&thread_current()->file_descriptor_list);
+	element = list_next(element)){
+		if(list_entry(element, struct file_descriptor, file_descriptor_list_elem)->fd == fd){
+			return list_entry(element, struct file_descriptor, file_descriptor_list_elem);
+		}
+	};
+	return NULL;
+}
+
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -606,6 +627,10 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->magic = THREAD_MAGIC;
 	list_push_back(&threads, &t->threads_elem);
 	sema_init(&t->wait_childexit, 0);
+	sema_init(&t->wait, 0);
+	list_init(&t->children);
+	list_init(&t->file_descriptor_list);
+	t->next_fd = 2;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
