@@ -57,17 +57,20 @@ void syscall_handler(struct intr_frame *f)
 		exit_helper(thread_name(), (int)f->R.rdi);
 		break;
 	case SYS_FORK:
+	{
 		tid_t success;
 		const char *t_name;
 
 		t_name = f->R.rdi;
 		success = process_fork(t_name, f);
-		
+
 		/* 사용자 프로그램에 결과 전달 */
 		f->R.rax = success;
-		
+
 		break;
+	}
 	case SYS_EXEC:
+	{
 		const char *cmd_line;
 		const char *t_name;
 
@@ -114,6 +117,7 @@ void syscall_handler(struct intr_frame *f)
 		if (process_exec(memcpy(f_name, cmd_line, size + 1)) == -1)
 			exit_helper(t_name, -1);
 		break;
+	}
 	default:
 		break;
 	}

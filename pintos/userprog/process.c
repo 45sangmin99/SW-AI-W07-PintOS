@@ -82,22 +82,31 @@ initd(void *f_name)
  * TID_ERROR if the thread cannot be created. */
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
-	struct thread *child;
-	struct intr_frame child_if;
+	tid_t child_tid;
 
-	/* 새 자식 스레드를 생성하고, 현재 스레드 컨텍스트를 복사 */
-	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
+	/* 현재 스레드 스냅샷 구조체 초기화 */
+	struct fork_context ctx;
+	ctx.user_frame = *if_;
+	ctx.parent = thread_current();
+	ctx.success = false;
+
+	sema_init(&(ctx.done), 0);
+
+	/* 새 자식 스레드를 생성하고 스냅샷 프레임을 복사 */
+	child_tid = thread_create(name, PRI_DEFAULT, __do_fork, &ctx);
+
+	/* create 실패 시 return */
 	if (child_tid == TID_ERROR)
 		return TID_ERROR;
 
-	/* 자식 스레드 프레임 설정 */
-	child = thread_get_by_tid(child_tid);
-	child_if = *if_;
+	/* create 성공 시 완전히 복제 될 때까지 기다림 */
+	sema_down(&(ctx.done));
 
-	child_if.R.rax = 0x0;
+	/* 복제 성공 여부 검증 */
+	if (!ctx.success)
+		return TID_ERROR;
+
 	if_->R.rax = child_tid;
-
-	child->tf = child_if;
 
 	return child_tid;
 }
@@ -115,8 +124,8 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
-	if (thread_name() == "main")
-		return 0;
+	if (is_kernel_vaddr(va))
+		return true;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page(parent->pml4, va);
@@ -124,6 +133,8 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
 	newpage = palloc_get_page(PAL_USER);
+	if (newpage == NULL)
+		return false;
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
@@ -136,7 +147,8 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	if (!pml4_set_page(current->pml4, va, newpage, writable))
 	{
 		/* 6. TODO: if fail to insert page, do error handling. */
-		return 0;
+		palloc_free_page(newpage);
+		return false;
 	}
 	return true;
 }
@@ -150,14 +162,14 @@ static void
 __do_fork(void *aux)
 {
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *)aux;
-	struct thread *current = thread_current();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
-	bool succ = true;
+	struct fork_context *ctx;
+	struct thread *current;
+
+	current = thread_current();
+	ctx = (struct fork_context *)aux;
 
 	/* 1. Read the cpu context to local stack. */
-	memcpy(&if_, parent_if, sizeof(struct intr_frame));
+	if_ = ctx->user_frame;
 
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
@@ -167,11 +179,12 @@ __do_fork(void *aux)
 	process_activate(current);
 #ifdef VM
 	supplemental_page_table_init(&current->spt);
-	if (!supplemental_page_table_copy(&current->spt, &parent->spt))
+	if (!supplemental_page_table_copy(&current->spt, &ctx->parent->spt))
 		goto error;
 #else
-	if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
+	if (!pml4_for_each(ctx->parent->pml4, duplicate_pte, ctx->parent))
 		goto error;
+
 #endif
 
 	/* TODO: Your code goes here.
@@ -183,9 +196,16 @@ __do_fork(void *aux)
 	process_init();
 
 	/* Finally, switch to the newly created process. */
-	if (succ)
-		do_iret(&if_);
+	ctx->success = true;
+	if_.R.rax = 0;
+
+	sema_up(&(ctx->done));
+
+	do_iret(&if_);
+	NOT_REACHED();
 error:
+	ctx->success = false;
+	sema_up(&(ctx->done));
 	thread_exit();
 }
 
