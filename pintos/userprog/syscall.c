@@ -49,13 +49,11 @@ void syscall_handler(struct intr_frame *f)
 {
 	switch (f->R.rax)
 	{
-	case SYS_WRITE:
-		if (f->R.rdi == 1)
-			putbuf(f->R.rsi, f->R.rdx);
-		break;
 	case SYS_EXIT:
+	{
 		exit_helper(thread_name(), (int)f->R.rdi);
 		break;
+	}
 	case SYS_FORK:
 	{
 		tid_t success;
@@ -118,6 +116,24 @@ void syscall_handler(struct intr_frame *f)
 			exit_helper(t_name, -1);
 		break;
 	}
+	case SYS_WAIT:
+	{
+		int pid;
+		int exit_status;
+
+		/* wait 호출 후 반환값 기록*/
+		pid = f->R.rdi;
+
+		exit_status = process_wait(pid);
+		f->R.rax = exit_status;
+		break;
+	}
+	case SYS_WRITE:
+	{
+		if (f->R.rdi == 1)
+			putbuf(f->R.rsi, f->R.rdx);
+		break;
+	}
 	default:
 		break;
 	}
@@ -127,6 +143,11 @@ void syscall_handler(struct intr_frame *f)
  * 추후 커널에서의 종료 계약이 완료되면, 대체할 수 있습니다. */
 static void exit_helper(const char *name, int status)
 {
+	struct thread *curr = thread_current();
+
+	if (curr->own_status != NULL)
+		curr->own_status->exit_status = status;
+
 	printf("%s: exit(%d)\n", name, status);
 	thread_exit();
 }
