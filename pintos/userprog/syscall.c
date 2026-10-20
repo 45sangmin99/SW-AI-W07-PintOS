@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -11,6 +12,9 @@
 #include "include/lib/kernel/stdio.h"
 #include "userprog/process.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/palloc.h"
+#include "threads/vaddr.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -73,23 +77,52 @@ void syscall_handler(struct intr_frame *f)
 		list_remove(&fd->file_descriptor_list_elem);
 		return;
 	}
-	case SYS_WRITE:
+	case SYS_FILESIZE:
+		if(!find_file_descriptor_by_fd(f->R.rdi) || !find_file_descriptor_by_fd(f->R.rdi)->file)break;
+		f->R.rax = file_length(find_file_descriptor_by_fd(f->R.rdi)->file);
+		return;
+	case SYS_READ:{
+		if(!f->R.rdi)break;
+		if(!f->R.rsi || !is_user_vaddr(f->R.rsi) || !pml4_get_page(thread_current()->pml4, f->R.rsi))break;
+		struct file_descriptor *fd = find_file_descriptor_by_fd(f->R.rdi);
+		if(!fd)break;
+		f->R.rax = file_read(fd->file, f->R.rsi, f->R.rdx);
+		return;
+	}
+	case SYS_WRITE:{
+		if(!f->R.rdi)break;	
+		if(!f->R.rsi || !is_user_vaddr(f->R.rsi) || !pml4_get_page(thread_current()->pml4, f->R.rsi))break;
 		if(f->R.rdi == 1){
 			putbuf(f->R.rsi, f->R.rdx);
+		}else{
+			struct file_descriptor *fd = find_file_descriptor_by_fd(f->R.rdi);
+			if(!fd)break;
+			f->R.rax = file_write(fd->file, f->R.rsi, f->R.rdx);
 		}
 		return;
+	}
 	case SYS_WAIT:
 		f->R.rax = process_wait(f->R.rdi);
 		return;
 	case SYS_EXIT:
 		printf("%s: exit(%d)\n",thread_name() ,f->R.rdi);
-		if(thread_current()->parent)find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->exit_status = f->R.rdi;
+		if(thread_current()->parent){
+			find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->exit_status = f->R.rdi;
+			find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->is_exit = true;
+		}
 		thread_exit();
 		return;
 	case SYS_FORK:
-		process_fork(thread_name(),f);
+		f->R.rax = process_fork(thread_name(),f);
+		return;
+	case SYS_EXEC:
+		if(!f->R.rdi || !is_user_vaddr(f->R.rdi) || !pml4_get_page(thread_current()->pml4, f->R.rdi))break;
+		void *temp = palloc_get_page(0b011);
+		strlcpy(temp, f->R.rdi, PGSIZE);
+		f->R.rax = process_exec(temp);
 		return;
 	default:
+		printf("%s is unknown systemcall \n", f->R.rax);
 		break;
 	}
 	f->R.rdi = -1;

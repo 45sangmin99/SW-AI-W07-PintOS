@@ -544,6 +544,17 @@ struct child *find_child_by_tid(struct list *children, tid_t tid){
 			return list_entry(element, struct child, child_elem);
 		}
 	};
+	return NULL;
+}
+
+struct child *add_child(struct list *children, tid_t tid){
+	struct thread *child_thread = thread_get_by_tid(tid);
+	struct child *child = malloc(sizeof(struct child));
+	list_push_back(children, &child->child_elem);
+	child->tid = tid;
+	child->is_exit = false;
+	sema_init(&child->wait_child, 0);
+	return child;
 }
 
 struct file_descriptor *find_file_descriptor_by_fd(int fd){
@@ -626,7 +637,6 @@ init_thread(struct thread *t, const char *name, int priority)
 	list_init(&t->donations);
 	t->magic = THREAD_MAGIC;
 	list_push_back(&threads, &t->threads_elem);
-	sema_init(&t->wait_childexit, 0);
 	sema_init(&t->wait, 0);
 	list_init(&t->children);
 	list_init(&t->file_descriptor_list);

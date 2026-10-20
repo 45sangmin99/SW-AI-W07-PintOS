@@ -88,7 +88,6 @@ struct thread
      * 우리는 가진게 semaphore 뿐이니까 세마포어를 씁시다.
      * https://github.com/torvalds/linux/blob/master/include/linux/sched/signal.h
      */
-    struct semaphore wait_childexit;
     struct semaphore wait;
 
     struct list children;
@@ -115,7 +114,9 @@ struct child
 {
     struct list_elem child_elem;
     tid_t tid;
+    struct semaphore wait_child;
     int exit_status;
+    bool is_exit;
 };
 
 struct file_descriptor
@@ -126,6 +127,7 @@ struct file_descriptor
 };
 
 struct child *find_child_by_tid(struct list *, tid_t);
+struct child *add_child(struct list *, tid_t);
 struct file_descriptor *find_file_descriptor_by_fd(int);
 
 /* If false (default), use round-robin scheduler.

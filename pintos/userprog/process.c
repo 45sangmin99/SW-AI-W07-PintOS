@@ -52,7 +52,10 @@ tid_t process_create_initd(const char *file_name)
 	strlcpy(fn_copy, file_name, PGSIZE);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
+	char name[16], *space;
+	strlcpy(name, file_name, sizeof name);
+	if(space=strchr(name, ' '))*space='\0';
+	tid = thread_create(name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page(fn_copy);
 	return tid;
@@ -78,20 +81,13 @@ initd(void *f_name)
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
 	/* Clone current thread to new thread.*/
-	struct child *child_thread = malloc(sizeof(struct child));
 	struct intr_frame child_if = *if_;
 	child_if.R.rax = thread_current(); 
-
-	child_thread->tid = thread_create(if_->R.rdi, PRI_DEFAULT, __do_fork, &child_if);
-	struct thread *child = thread_get_by_tid(child_thread->tid);
-	child->parent = thread_current();
-	
+	struct thread *child_thread = thread_get_by_tid(add_child(&thread_current()->children, thread_create(if_->R.rdi, PRI_DEFAULT, __do_fork, &child_if))->tid);
+	child_thread->parent = thread_current();
 	if_->R.rax = child_thread->tid;
 	
-	// thread_current()->tf = *if_;
-	// child->tf = child_if;
-	list_push_back(&thread_current()->children, &child_thread->child_elem);
-	sema_down(&child->wait);
+	sema_down(&child_thread->wait);
 	return child_thread->tid;
 }
 
@@ -173,6 +169,15 @@ __do_fork(void *aux)
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 
+	for(struct list_elem *element = list_begin(&parent->file_descriptor_list);
+		element != list_tail(&parent->file_descriptor_list); 
+		element = list_next(element)){
+			struct file_descriptor *fd = malloc(sizeof(struct file_descriptor));
+			memcpy(fd, list_entry(element, struct file_descriptor, file_descriptor_list_elem), sizeof(struct file_descriptor));
+			fd->file = file_duplicate(list_entry(element, struct file_descriptor, file_descriptor_list_elem)->file);
+			list_push_back(&current->file_descriptor_list, &fd->file_descriptor_list_elem);
+		}
+	current->next_fd = parent->next_fd;
 	process_init();
 
 	/* Finally, switch to the newly created process. */
@@ -206,8 +211,11 @@ int process_exec(void *f_name)
 
 	/* If load failed, quit. */
 	palloc_free_page(file_name);
-	if (!success)
+	if (!success){
+		printf("%s: exit(-1)\n", thread_name());
+		thread_exit();
 		return -1;
+	}
 
 	/* Start switched process. */
 	do_iret(&_if);
@@ -228,10 +236,15 @@ process_wait (tid_t child_tid) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	struct thread *t = thread_get_by_tid(child_tid);
-	sema_down(&(t->wait_childexit));
-	find_child_by_tid(&thread_current()->children, child_tid)->exit_status;
-	return find_child_by_tid(&thread_current()->children, child_tid)->exit_status;
+	struct child *ch = find_child_by_tid(&thread_current()->children, child_tid);
+	if(!ch){
+		ch = add_child(&thread_current()->children ,child_tid);
+		thread_get_by_tid(child_tid)->parent = thread_current();
+	}
+	if(ch->is_exit)return ch->exit_status;
+	sema_down(&ch->wait_child);
+	ch->is_exit = true;
+	return ch->exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -242,7 +255,9 @@ void process_exit(void)
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-	sema_up(&(thread_current()->wait_childexit));
+	if(thread_current()->parent){
+		sema_up(&find_child_by_tid(&thread_current()->parent->children, curr->tid)->wait_child);
+	}
  	process_cleanup();
 }
 
@@ -389,10 +404,7 @@ load(const char *file_name, struct intr_frame *if_)
 			argc ++;
 			if_->R.rsi -= temp - p;
 			memcpy(if_->R.rsi, p, temp-p);
-			if(p==file_name){
-				strlcpy(thread_current()->name, file_name, temp-p);
-				break;
-			}
+			if(p==file_name)break;
 			temp = p;
 			*(p-1) = '\0';
 		}
