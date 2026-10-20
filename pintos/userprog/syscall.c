@@ -10,6 +10,7 @@
 #include "intrinsic.h"
 #include "userprog/process.h"
 #include "threads/palloc.h"
+#include "filesys/filesys.h"
 
 #include "include/lib/kernel/stdio.h"
 
@@ -130,9 +131,73 @@ void syscall_handler(struct intr_frame *f)
 		break;
 	}
 	case SYS_CREATE:
+	{
+		break;
+	}
 	case SYS_REMOVE:
+	{
+		break;
+	}
 	case SYS_OPEN:
+	{
+		struct file **curr_fd_table;
+		struct file *opened_file;
+		const char *filename;
+		int size;
+
+		filename = f->R.rdi;
+		curr_fd_table = thread_current()->fd_table;
+
+		/* 파일명 검증 루틴 */
+		if (filename == NULL)
+		{
+			f->R.rax = -1;
+			break;
+		}
+
+		size = 0;
+		while (size < PGSIZE)
+		{
+			/* 사용자 공간에 있는지 */
+			if (!is_user_vaddr(filename + size))
+				exit_helper(thread_name(), -1);
+
+			/* 시작 주소가 페이지에 매핑되어 있는지 */
+			if (pml4_get_page(thread_current()->pml4, filename + size) == NULL)
+				exit_helper(thread_name(), -1);
+
+			/* 종료 조건 */
+			if (filename[size] == '\0')
+				break;
+			size++;
+		}
+
+		/* 커널 한 페이지 (4096바이트) 안에 들어가는 지 */
+		if (size == PGSIZE)
+			exit_helper(thread_name(), -1);
+
+		/* open 루틴 */
+		for (size_t i = 2; i < PGSIZE / sizeof *curr_fd_table; i++)
+			if (curr_fd_table[i] == NULL)
+			{
+				opened_file = filesys_open(filename);
+				if (opened_file == NULL)
+				{
+					f->R.rax = -1;
+					return;
+				}
+				/* 반환 */
+				curr_fd_table[i] = opened_file;
+				f->R.rax = i;
+				return;
+			}
+		f->R.rax = -1;
+		break;
+	}
 	case SYS_FILESIZE:
+	{
+		break;
+	}
 	case SYS_READ:
 	{
 		break;
@@ -144,10 +209,21 @@ void syscall_handler(struct intr_frame *f)
 		break;
 	}
 	case SYS_SEEK:
-	case SYS_TELL:
-	case SYS_CLOSE:
-	default:
+	{
 		break;
+	}
+	case SYS_TELL:
+	{
+		break;
+	}
+	case SYS_CLOSE:
+	{
+		break;
+	}
+	default:
+	{
+		break;
+	}
 	}
 }
 
