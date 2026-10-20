@@ -380,7 +380,7 @@ void process_exit(void)
 	process_cleanup();
 
 	/* 자식 정리 */
-	while (list_empty(&(curr->children)))
+	while (!list_empty(&(curr->children)))
 	{
 		elem = list_pop_front(&(curr->children));
 		cs = list_entry(elem, struct child_status, elem);
