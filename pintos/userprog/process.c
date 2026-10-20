@@ -212,7 +212,8 @@ int process_exec(void *f_name)
 	/* If load failed, quit. */
 	palloc_free_page(file_name);
 	if (!success){
-		printf("%s: exit(-1)\n", thread_name());
+		if(thread_current()->parent)find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->exit_status = -1;
+		printf("%s: exit(%d)\n", thread_name(), -1);
 		thread_exit();
 		return -1;
 	}
@@ -236,15 +237,23 @@ process_wait (tid_t child_tid) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	// if(!thread_get_by_tid(child_tid)) return -1;
 	struct child *ch = find_child_by_tid(&thread_current()->children, child_tid);
 	if(!ch){
 		ch = add_child(&thread_current()->children ,child_tid);
-		thread_get_by_tid(child_tid)->parent = thread_current();
+		if(thread_get_by_tid(child_tid))thread_get_by_tid(child_tid)->parent = thread_current();
+		else return -1;
 	}
-	if(ch->is_exit)return ch->exit_status;
+	if(ch->is_exit){
+		int value = ch->exit_status;
+		ch->exit_status = -1;
+		return value;
+	}
 	sema_down(&ch->wait_child);
 	ch->is_exit = true;
-	return ch->exit_status;
+	int value = ch->exit_status;
+	ch->exit_status = -1;
+	return value;
 }
 
 /* Exit the process. This function is called by thread_exit (). */

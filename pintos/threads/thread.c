@@ -533,7 +533,7 @@ struct thread *thread_get_by_tid(tid_t tid){
 			return list_entry(element, struct thread, threads_elem);
 		}
 	};
-	NOT_REACHED();
+	return NULL;
 }
 
 struct child *find_child_by_tid(struct list *children, tid_t tid){
