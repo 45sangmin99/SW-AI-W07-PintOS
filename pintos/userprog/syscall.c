@@ -11,6 +11,7 @@
 #include "userprog/process.h"
 #include "threads/palloc.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
 
 #include "include/lib/kernel/stdio.h"
 
@@ -177,7 +178,7 @@ void syscall_handler(struct intr_frame *f)
 			exit_helper(thread_name(), -1);
 
 		/* open 루틴 */
-		for (size_t i = 2; i < PGSIZE / sizeof *curr_fd_table; i++)
+		for (size_t i = 2; i < PGSIZE / sizeof(*curr_fd_table); i++)
 			if (curr_fd_table[i] == NULL)
 			{
 				opened_file = filesys_open(filename);
@@ -218,6 +219,23 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_CLOSE:
 	{
+		struct file **curr_fd_table;
+		int size;
+		int fd;
+
+		fd = (int)f->R.rdi;
+
+		size = PGSIZE / sizeof(*curr_fd_table);
+		if (fd < 2 || fd >= size)
+			break;
+
+		curr_fd_table = thread_current()->fd_table;
+
+		if (curr_fd_table == NULL || curr_fd_table[fd] == NULL)
+			break;
+
+		file_close(curr_fd_table[fd]);
+		curr_fd_table[fd] = NULL;
 		break;
 	}
 	default:
