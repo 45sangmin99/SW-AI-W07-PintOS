@@ -21,6 +21,7 @@ enum thread_status
 };
 
 struct child_status;
+struct file;
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
@@ -85,8 +86,10 @@ struct thread
     struct list_elem elem;         /* List element. */
     struct list_elem threads_elem; /* for implement mlfqs */
 
-    struct list children;
-    struct child_status *own_status;
+    struct list children;            /* 후레자식들 */
+    struct child_status *own_status; /* 상태를 전달하기 위한 구조체 */
+
+    struct file **fd_table; /* FD table */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

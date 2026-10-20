@@ -110,6 +110,7 @@ initd(void *aux)
 	ctx = (struct initd_context *)aux;
 	cmd_line = ctx->cmd_line;
 	thread_current()->own_status = ctx->cs;
+
 	free(ctx);
 
 	/* 첫 실행에서만 명령줄의 인자 부분을 이름에서 제외합니다. */
@@ -118,6 +119,14 @@ initd(void *aux)
 		*space = '\0';
 
 	process_init();
+
+	/* 파일 디스크럽터 테이블 페이지 할당 */
+	thread_current()->fd_table = palloc_get_page(PAL_ZERO);
+	if (thread_current()->fd_table == NULL)
+	{
+		palloc_free_page(cmd_line);
+		return thread_exit();
+	}
 
 	if (process_exec(cmd_line) < 0)
 		PANIC("Fail to launch initd\n");
@@ -386,6 +395,17 @@ void process_exit(void)
 		cs = list_entry(elem, struct child_status, elem);
 
 		child_status_put(cs);
+	}
+
+	/* 파일 테이블 정리 */
+	if (curr->fd_table != NULL)
+	{
+		for (size_t i = 2; i < PGSIZE / sizeof(*curr->fd_table); i++)
+			if (curr->fd_table[i] != NULL)
+				file_close(curr->fd_table[i]);
+		palloc_free_page(curr->fd_table);
+
+		curr->fd_table = NULL;
 	}
 
 	/* 종료 통보 */

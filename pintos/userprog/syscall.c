@@ -49,6 +49,7 @@ void syscall_handler(struct intr_frame *f)
 {
 	switch (f->R.rax)
 	{
+	case SYS_HALT:
 	case SYS_EXIT:
 	{
 		exit_helper(thread_name(), (int)f->R.rdi);
@@ -128,12 +129,23 @@ void syscall_handler(struct intr_frame *f)
 		f->R.rax = exit_status;
 		break;
 	}
+	case SYS_CREATE:
+	case SYS_REMOVE:
+	case SYS_OPEN:
+	case SYS_FILESIZE:
+	case SYS_READ:
+	{
+		break;
+	}
 	case SYS_WRITE:
 	{
 		if (f->R.rdi == 1)
 			putbuf(f->R.rsi, f->R.rdx);
 		break;
 	}
+	case SYS_SEEK:
+	case SYS_TELL:
+	case SYS_CLOSE:
 	default:
 		break;
 	}
