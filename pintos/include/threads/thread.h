@@ -90,6 +90,7 @@ struct thread
     struct child_status *own_status; /* 상태를 전달하기 위한 구조체 */
 
     struct file **fd_table; /* FD table */
+    struct file *exec_file;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

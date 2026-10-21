@@ -17,6 +17,8 @@
 
 #include "include/lib/kernel/stdio.h"
 
+struct lock filesys_lock;
+
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
@@ -49,6 +51,8 @@ void syscall_init(void)
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			  FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	lock_init(&(filesys_lock));
 }
 
 /* The main system call interface */
@@ -122,7 +126,9 @@ void syscall_handler(struct intr_frame *f)
 			return;
 		}
 
+		lock_acquire(&filesys_lock);
 		f->R.rax = filesys_create(filename, (off_t)init_size);
+		lock_release(&filesys_lock);
 		break;
 	}
 	case SYS_REMOVE:
@@ -132,7 +138,9 @@ void syscall_handler(struct intr_frame *f)
 		filename = (const char *)f->R.rdi;
 		check_user_string(filename);
 
+		lock_acquire(&filesys_lock);
 		f->R.rax = filesys_remove(filename);
+		lock_release(&filesys_lock);
 		break;
 	}
 	case SYS_OPEN:
@@ -152,7 +160,10 @@ void syscall_handler(struct intr_frame *f)
 		for (size_t i = 2; i < PGSIZE / sizeof(*curr_fd_table); i++)
 			if (curr_fd_table[i] == NULL)
 			{
+
+				lock_acquire(&filesys_lock);
 				opened_file = filesys_open(filename);
+				lock_release(&filesys_lock);
 				if (opened_file == NULL)
 				{
 					f->R.rax = -1;
@@ -208,7 +219,10 @@ void syscall_handler(struct intr_frame *f)
 				f->R.rax = -1;
 				return;
 			}
+
+			lock_acquire(&filesys_lock);
 			f->R.rax = (uint64_t)file_read(file, buf, len);
+			lock_release(&filesys_lock);
 		}
 		break;
 	}
@@ -247,7 +261,10 @@ void syscall_handler(struct intr_frame *f)
 			f->R.rax = -1;
 			return;
 		}
+
+		lock_acquire(&filesys_lock);
 		f->R.rax = (uint64_t)file_write(file, buf, len);
+		lock_release(&filesys_lock);
 		return;
 	}
 	case SYS_SEEK:
@@ -290,7 +307,9 @@ void syscall_handler(struct intr_frame *f)
 		struct file *file = lookup_file(fd);
 		if (file != NULL)
 		{
+			lock_acquire(&filesys_lock);
 			file_close(file);
+			lock_release(&filesys_lock);
 			thread_current()->fd_table[fd] = NULL;
 		}
 		break;

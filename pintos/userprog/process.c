@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -268,7 +269,7 @@ __do_fork(void *aux)
 	child_fd_table = palloc_get_page(PAL_ZERO);
 	if (child_fd_table == NULL)
 		goto error;
-		
+
 	current->fd_table = child_fd_table;
 
 	parent_fd_table = ctx->parent->fd_table;
@@ -279,11 +280,21 @@ __do_fork(void *aux)
 	{
 		if (parent_fd_table[i])
 		{
+			lock_acquire(&filesys_lock);
 			child_fd_table[i] = file_duplicate(parent_fd_table[i]);
+			lock_release(&filesys_lock);
+
 			if (child_fd_table[i] == NULL)
 				goto error;
 		}
 	}
+
+	lock_acquire(&filesys_lock);
+	current->exec_file = file_duplicate(ctx->parent->exec_file);
+	lock_release(&filesys_lock);
+
+	if (current->exec_file == NULL)
+		goto error;
 
 	process_init();
 
@@ -320,7 +331,10 @@ int process_exec(void *f_name)
 	process_cleanup();
 
 	/* And then load the binary */
+
+	lock_acquire(&filesys_lock);
 	success = load(file_name, &_if);
+	lock_release(&filesys_lock);
 
 	/* If load failed, quit. */
 	palloc_free_page(file_name);
@@ -419,7 +433,11 @@ void process_exit(void)
 	{
 		for (size_t i = 2; i < PGSIZE / sizeof(*curr->fd_table); i++)
 			if (curr->fd_table[i] != NULL)
+			{
+				lock_acquire(&filesys_lock);
 				file_close(curr->fd_table[i]);
+				lock_release(&filesys_lock);
+			}
 		palloc_free_page(curr->fd_table);
 
 		curr->fd_table = NULL;
@@ -461,6 +479,11 @@ process_cleanup(void)
 		pml4_activate(NULL);
 		pml4_destroy(pml4);
 	}
+
+	lock_acquire(&filesys_lock);
+	file_close(curr->exec_file);
+	lock_release(&filesys_lock);
+	curr->exec_file = NULL;
 }
 
 /* Sets up the CPU for running user code in the nest thread.
@@ -607,11 +630,15 @@ load(const char *file_name, struct intr_frame *if_)
 
 	/* 실행 파일 열기 */
 	file = filesys_open(file_name);
+
 	if (file == NULL)
 	{
 		printf("load: %s: open failed\n", file_name);
 		goto done;
 	}
+
+	/* 쓰기 금지 ! */
+	file_deny_write(file);
 
 	/* executable header를 읽고 검증 */
 	if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 0x3E // amd64
@@ -686,8 +713,10 @@ load(const char *file_name, struct intr_frame *if_)
 	success = true;
 
 done:
-	/* We arrive here whether the load is successful or not. */
-	file_close(file);
+	if (success)
+		thread_current()->exec_file = file;
+	else
+		file_close(file);
 	return success;
 }
 
