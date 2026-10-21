@@ -32,6 +32,7 @@ struct fork_p_args {
     struct intr_frame parent_if; //fork()인자로 받은것
 	struct semaphore sema;
 	bool success; // 자식복제 성공여부
+	struct child_status * shared_status; /* fork에 do_fork 기록전달 */
 };
 
 /* General process initializer for initd and other process. */
@@ -84,28 +85,52 @@ initd(void *f_name)
  * TID_ERROR if the thread cannot be created. */
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
-	struct fork_p_args args;	
+	struct fork_p_args args;
+	
+	/* 메모리 할당 및 초기화 */
+	args.shared_status = palloc_get_page(PAL_ZERO);
+
+	/* 메모리 할당 실패 시 fork 실패 반환 */
+	if(args.shared_status == NULL){
+		return TID_ERROR;
+	}
+	/* 공유 구조체 참조 2*/
+	args.shared_status->ref_count = 2;
+	sema_init(&args.shared_status->exit_sema, 0);
+
 	/* 부모스레드 & 인터럽트 프레임포인터 저장*/
 	args.parent = thread_current();
 	memcpy(&args.parent_if,if_,sizeof(struct intr_frame));
 
+	/* 구조체 하나로 초기화 */
+	args.shared_status->exit_status = -1;
+	
 	/* 부모 프레임 복사 끝내기전에 진행 */
 	sema_init(&args.sema, 0);
+	
+	/* args.success 초기화 */
+	args.success = false;
 
 	/* args aux로 전달 하고 자식 얻기 */
 	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, &args);
-
-	/* child_tid 실패검사 */
+	
+	/* 자식 스레드를 생성하고 fork에 필요한 정보를 전달 */
 	if(child_tid == TID_ERROR){
+		palloc_free_page(args.shared_status);
 		return TID_ERROR;
 	}
 	/* 부모가 자식 성공여부 확인 */
 	sema_down(&args.sema);
+
 	if (!args.success)
 	{
 		return TID_ERROR;
 	}
+	/* 커널 공유구조체 child_tid 저장 */
+	args.shared_status->child_tid = child_tid;
+	list_push_back(&args.parent->p_childlist, &args.shared_status->elem);
 
+	/* fork 반환값 tid*/
 	if_->R.rax = child_tid;
 	
 	return child_tid;
@@ -163,8 +188,8 @@ __do_fork(void *aux)
 	struct fork_p_args *args = aux;
 	struct thread *parent = args->parent;
 	struct thread *current = thread_current();
+	current->child_status = args->shared_status;
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-
 	/* 1. Read the cpu context to local stack. */
 	memcpy(&if_,&args->parent_if,sizeof(struct intr_frame));
 	if_.R.rax = 0;
@@ -175,6 +200,7 @@ __do_fork(void *aux)
 		goto error;
 
 	process_activate(current);
+	
 #ifdef VM
 	supplemental_page_table_init(&current->spt);
 	if (!supplemental_page_table_copy(&current->spt, &parent->spt))
@@ -249,8 +275,42 @@ process_wait (tid_t child_tid) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	struct thread *t = thread_get_by_tid(child_tid);
-	sema_down(&(t->wait_childexit));
+	struct list_elem *child_elem;
+	struct child_status *child_search;
+	int exit_status;
+	enum intr_level intr_level; /* 인터럽트 담을 변수 */
+	int intr_count; /* 감소 결과 */
+
+	/* 일치하는 자식 찾기 (중복대기방지 & 자식종료대기) */
+	for (child_elem = list_begin(&thread_current()->p_childlist);
+     	child_elem != list_end(&thread_current()->p_childlist);
+     	child_elem = list_next(child_elem)) {
+
+		child_search = list_entry(child_elem,struct child_status,elem);
+		/* 자식 tid 일치 확인 */	
+		if(child_search->child_tid == child_tid){
+			if(child_search->wait_check == true){
+				return -1;
+			}
+				child_search->wait_check = true;
+				sema_down(&child_search->exit_sema);
+
+				/* 참조 감소(인터럽트 끈 구간) */
+				intr_level = intr_disable();
+				child_search->ref_count -- ;
+				intr_count = child_search->ref_count;
+				intr_set_level(intr_level);
+
+				exit_status = child_search->exit_status;
+				list_remove(child_elem);
+
+				/* 부모와 자식이 모두 참조 끝냈을때 공유구조체 해제 */
+				if(intr_count == 0){
+					palloc_free_page(child_search);
+				}
+				return exit_status;
+		}
+	}
 	return -1;
 }
 
@@ -258,11 +318,43 @@ process_wait (tid_t child_tid) {
 void process_exit(void)
 {
 	struct thread *curr = thread_current();
+	enum intr_level intr_level; /* 인터럽트 담을 변수 */
+	int intr_count; /* 감소 결과 */
+	struct list_elem *e; /* 맨앞 리스트 저장 */
+	struct child_status *child;
 	/* TODO: Your code goes here.
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-	sema_up(&(thread_current()->wait_childexit));
+
+	/* 자식 스레드 공유구조체 확인 후 부모 깨우기 */
+	 if(curr->child_status != NULL){
+		sema_up(&curr->child_status->exit_sema);
+		
+		/* 참조 감소(인터럽트 끈 구간) */
+		intr_level = intr_disable();
+		curr->child_status->ref_count -- ;
+		intr_count = curr->child_status->ref_count;
+		intr_set_level(intr_level);
+		if(intr_count == 0){
+			palloc_free_page(curr->child_status);
+			curr->child_status = NULL;
+		}
+	}
+	/* 리스트 항목 빼기 */
+	while(!list_empty(&curr->p_childlist)){
+		e = list_pop_front(&curr->p_childlist);
+		struct child_status * child = list_entry(e,struct child_status,elem);
+		intr_level = intr_disable();
+		child->ref_count -- ;
+		intr_count = child->ref_count;
+		intr_set_level(intr_level);
+		
+		if(intr_count == 0){
+			palloc_free_page(child);
+		}
+
+	}
  	process_cleanup ();
 }
 

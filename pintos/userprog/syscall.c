@@ -42,7 +42,7 @@ void syscall_init(void)
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f)
 {
-		
+	struct thread *tc = thread_current();
 	switch (f->R.rax)
 	{
 	case SYS_WRITE:
@@ -51,6 +51,9 @@ void syscall_handler(struct intr_frame *f)
 		}
 		break;
 	case SYS_EXIT:
+		if (tc->child_status != NULL) {
+    		tc->child_status->exit_status = f->R.rdi;
+		}
 		printf("%s: exit(%d)\n",thread_name() ,f->R.rdi);
 		thread_exit();
 		return;

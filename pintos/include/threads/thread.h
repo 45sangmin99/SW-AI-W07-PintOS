@@ -19,6 +19,14 @@ enum thread_status
     THREAD_BLOCKED, /* Waiting for an event to trigger. */
     THREAD_DYING    /* About to be destroyed. */
 };
+struct child_status {
+	struct list_elem elem; /* thread.h p_child 연결*/
+	tid_t child_tid; /* child TID */
+	int exit_status; /* 부모에게 exit값 반환 */
+	struct semaphore exit_sema; /* 자식 종료를 부모가 기다림 */
+	bool wait_check; /* 부모가 자식 wait상태 체크 */
+	int ref_count; /* 공유구조체를 참조한 부모 자식수 */
+};
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
@@ -65,6 +73,8 @@ typedef int tid_t;
  *
  * The `elem' member can be used in the run queue, a semaphore
  * wait list, or the sleep list.  These uses are mutually exclusive. */
+struct child_status; /* child_status 연결 */
+
 struct thread
 {
     /* Owned by thread.c. */
@@ -88,7 +98,8 @@ struct thread
      * 우리는 가진게 semaphore 뿐이니까 세마포어를 씁시다.
      * https://github.com/torvalds/linux/blob/master/include/linux/sched/signal.h
      */
-    struct semaphore wait_childexit;
+    struct list p_childlist; /* 부모가 자식 목록 */
+    struct child_status *child_status; /* 자식의 자신 상태정보 */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -104,10 +115,13 @@ struct thread
     unsigned magic;       /* Detects stack overflow. */
 };
 
+
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+
 
 void thread_init(void);
 void thread_start(void);
