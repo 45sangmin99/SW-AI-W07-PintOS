@@ -42,7 +42,7 @@ void syscall_init(void)
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f)
 {
-		
+	struct thread *tc = thread_current();
 	switch (f->R.rax)
 	{
 	case SYS_WRITE:
@@ -50,13 +50,62 @@ void syscall_handler(struct intr_frame *f)
 			putbuf(f->R.rsi, f->R.rdx);
 		}
 		break;
+	case SYS_WAIT:
+		f->R.rax = process_wait(f->R.rdi);
+		return;
 	case SYS_EXIT:
+		if (tc->child_status != NULL) {
+    		tc->child_status->exit_status = f->R.rdi;
+		}
 		printf("%s: exit(%d)\n",thread_name() ,f->R.rdi);
 		thread_exit();
 		return;
 	case SYS_FORK:
 		process_fork(thread_name(),f);
 		return;
+
+	case SYS_EXEC:
+	{
+		char *fn_copy;
+		const char *s = (const char *) f->R.rdi; /* 시작주소변수 */
+		bool result = false; /* 결과변수 */
+		size_t i;
+		const char *p;
+		
+		if(s!=NULL){
+			for(i=0; i<PGSIZE; i++){
+				p = s+i;
+				if(!is_user_vaddr(p) || pml4_get_page(thread_current()->pml4, p) == NULL){
+					break;
+				}
+				if(*p == '\0'){
+					result = true;
+					break;
+				}
+			}
+		}
+			
+		/* 문자열 끝까지 매핑여부 검사 */
+		if (!result) {
+			f->R.rax = -1;
+			return;
+		}
+		fn_copy = palloc_get_page(0);
+
+		/* 페이지 할당 검사 */
+		if(fn_copy == NULL){
+			f->R.rax = -1;
+			return;
+		}
+		strlcpy(fn_copy,(char *)f->R.rdi,PGSIZE);
+		process_exec(fn_copy);
+		if (tc->child_status != NULL) {
+    		tc->child_status->exit_status = -1;
+		}
+		printf("%s: exit(%d)\n", thread_name(), -1);
+		thread_exit();
+		return;
+	}
 	default:
 		break;
 	}
