@@ -21,6 +21,9 @@ void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
 static void exit_helper(const char *name, int status) NO_RETURN;
+static size_t check_user_string(const char *str);
+static bool check_user_buffer(const void *buffer, unsigned len, bool writable);
+static struct file *lookup_file(int fd);
 
 /* System call.
  *
@@ -77,49 +80,13 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_EXEC:
 	{
-		const char *cmd_line;
-		const char *t_name;
-
-		char *f_name;
-		void *current_page;
-
-		int size;
-
-		t_name = thread_name();
-		cmd_line = (char *)f->R.rdi;
-		/* 유효성 검증 */
-		/* 명령줄이 NULL 인지 */
-		if (cmd_line == NULL)
-			exit_helper(t_name, -1);
-
-		/* 문자열 검증 */
-		size = 0;
-		while (size < PGSIZE)
-		{
-			/* 사용자 공간에 있는지 */
-			if (!is_user_vaddr(cmd_line + size))
-				exit_helper(t_name, -1);
-
-			/* 시작 주소가 페이지에 매핑되어 있는지 */
-			if (pml4_get_page(thread_current()->pml4, cmd_line + size) == NULL)
-				exit_helper(t_name, -1);
-
-			/* 종료 조건 */
-			if (cmd_line[size] == '\0')
-				break;
-			size++;
-		}
-
-		/* 커널 한 페이지 (4096바이트) 안에 들어가는 지 */
-		if (size == PGSIZE)
-			exit_helper(t_name, -1);
-
-		/* 커널 공간 매핑 */
-		f_name = palloc_get_page(0);
+		const char *cmd_line = (const char *)f->R.rdi;
+		const char *t_name = thread_name();
+		size_t size = check_user_string(cmd_line);
+		char *f_name = palloc_get_page(0);
 		if (f_name == NULL)
 			exit_helper(t_name, -1);
 
-		/* 인수 전달 */
 		if (process_exec(memcpy(f_name, cmd_line, size + 1)) == -1)
 			exit_helper(t_name, -1);
 		break;
@@ -146,41 +113,16 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_OPEN:
 	{
-		struct file **curr_fd_table;
+		struct file **curr_fd_table = thread_current()->fd_table;
 		struct file *opened_file;
-		const char *filename;
-		int size;
+		const char *filename = (const char *)f->R.rdi;
 
-		filename = f->R.rdi;
-		curr_fd_table = thread_current()->fd_table;
-
-		/* 파일명 검증 루틴 */
 		if (filename == NULL)
 		{
 			f->R.rax = -1;
 			break;
 		}
-
-		size = 0;
-		while (size < PGSIZE)
-		{
-			/* 사용자 공간에 있는지 */
-			if (!is_user_vaddr(filename + size))
-				exit_helper(thread_name(), -1);
-
-			/* 시작 주소가 페이지에 매핑되어 있는지 */
-			if (pml4_get_page(thread_current()->pml4, filename + size) == NULL)
-				exit_helper(thread_name(), -1);
-
-			/* 종료 조건 */
-			if (filename[size] == '\0')
-				break;
-			size++;
-		}
-
-		/* 커널 한 페이지 (4096바이트) 안에 들어가는 지 */
-		if (size == PGSIZE)
-			exit_helper(thread_name(), -1);
+		check_user_string(filename);
 
 		/* open 루틴 */
 		for (size_t i = 2; i < PGSIZE / sizeof(*curr_fd_table); i++)
@@ -202,194 +144,87 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_FILESIZE:
 	{
-		struct file **curr_fd_table;
-		int fd;
-
-		fd = f->R.rdi;
-
-		if (fd < 2 || fd >= PGSIZE / sizeof(*curr_fd_table))
-		{
-			f->R.rax = -1;
-			return;
-		}
-
-		curr_fd_table = thread_current()->fd_table;
-		if (curr_fd_table == NULL || curr_fd_table[fd] == NULL)
-		{
-			f->R.rax = -1;
-			return;
-		}
-
-		f->R.rax = file_length(curr_fd_table[fd]);
+		struct file *file = lookup_file((int)f->R.rdi);
+		f->R.rax = file == NULL ? -1 : file_length(file);
 		break;
 	}
 	case SYS_READ:
 	{
-		struct thread *curr;
-		struct file **curr_fd_table;
-		int fd;
-		char *buf;
-		unsigned len;
-
-		uint64_t pg_start;
-		uint64_t pg_end;
-
-		fd = f->R.rdi;
-		buf = (char *)f->R.rsi;
-		len = (off_t)f->R.rdx;
+		int fd = f->R.rdi;
+		char *buf = (char *)f->R.rsi;
+		unsigned len = (off_t)f->R.rdx;
 
 		if (len == 0)
 		{
 			f->R.rax = 0;
 			return;
 		}
-
-		/* 주소 범위 검사 */
-		if (buf == NULL || !is_user_vaddr(buf))
-			exit_helper(thread_name(), -1);
-
-		if (len > (uintptr_t)KERN_BASE - (uintptr_t)buf)
+		if (!check_user_buffer(buf, len, true))
 		{
 			f->R.rax = -1;
 			return;
 		}
 
-		curr = thread_current();
-
-		/* 페이지 매핑과 NULL 검사 */
-
-		pg_start = (uintptr_t)pg_round_down((uintptr_t)buf);
-		pg_end = (uintptr_t)pg_round_down((uintptr_t)buf + len - 1);
-
-		for (uint64_t pg = pg_start; pg <= pg_end; pg += PGSIZE)
-		{
-			if (pml4_get_page(curr->pml4, (const void *)pg) == NULL)
-				exit_helper(thread_name(), -1);
-
-			uint64_t *pte = pml4e_walk(curr->pml4, pg, 0);
-			if (!is_user_pte(pte) || !is_writable(pte))
-				exit_helper(thread_name(), -1);
-		}
-
-		curr_fd_table = curr->fd_table;
-
-		/* 표준 출력일 경우 오류 */
 		if (fd == 1)
 		{
 			f->R.rax = -1;
 			return;
 		}
-
-		/* 표준 입력 분기 */
 		if (fd == 0)
 		{
 			for (size_t i = 0; i < len; i++)
 				buf[i] = input_getc();
 			f->R.rax = len;
 		}
-		/* 일반 파일 분기 */
 		else
 		{
-			if (curr_fd_table == NULL || fd < 0 || fd >= PGSIZE / sizeof(*curr_fd_table))
+			struct file *file = lookup_file(fd);
+			if (file == NULL)
 			{
 				f->R.rax = -1;
 				return;
 			}
-
-			if (curr_fd_table[fd] == NULL)
-			{
-				f->R.rax = -1;
-				return;
-			}
-
-			f->R.rax = (uint64_t)file_read(curr_fd_table[fd], buf, len);
+			f->R.rax = (uint64_t)file_read(file, buf, len);
 		}
-
 		break;
 	}
 	case SYS_WRITE:
 	{
-		struct thread *curr;
-		struct file **curr_fd_table;
-
-		int fd;
-		char *buf;
-		unsigned len;
-
-		uint64_t pg_start;
-		uint64_t pg_end;
-
-		fd = f->R.rdi;
-		buf = (char *)f->R.rsi;
-		len = f->R.rdx;
+		int fd = f->R.rdi;
+		const char *buf = (const char *)f->R.rsi;
+		unsigned len = f->R.rdx;
 
 		if (len == 0)
 		{
 			f->R.rax = 0;
 			return;
 		}
-
-		/* 주소 범위 검사 */
-		if (buf == NULL || !is_user_vaddr(buf))
-			exit_helper(thread_name(), -1);
-
-		if (len > (uintptr_t)KERN_BASE - (uintptr_t)buf)
+		if (!check_user_buffer(buf, len, false))
 		{
 			f->R.rax = -1;
 			return;
 		}
 
-		curr = thread_current();
-
-		/* 페이지 매핑과 NULL 검사 */
-
-		pg_start = (uintptr_t)pg_round_down((uintptr_t)buf);
-		pg_end = (uintptr_t)pg_round_down((uintptr_t)buf + len - 1);
-
-		for (uint64_t pg = pg_start; pg <= pg_end; pg += PGSIZE)
-		{
-			if (pml4_get_page(curr->pml4, (const void *)pg) == NULL)
-				exit_helper(thread_name(), -1);
-
-			uint64_t *pte = pml4e_walk(curr->pml4, pg, 0);
-			if (!is_user_pte(pte))
-				exit_helper(thread_name(), -1);
-		}
-
-		curr_fd_table = curr->fd_table;
-
-		/* 표준 입력일 경우 오류 */
 		if (fd == 0)
 		{
 			f->R.rax = -1;
 			return;
 		}
-
-		/* 표준 출력 분기 */
 		if (fd == 1)
 		{
 			putbuf(buf, len);
 			f->R.rax = len;
 			return;
 		}
-		/* 일반 파일 분기*/
-		else
+
+		struct file *file = lookup_file(fd);
+		if (file == NULL)
 		{
-			if (curr_fd_table == NULL || fd < 0 || fd >= PGSIZE / sizeof(*curr_fd_table))
-			{
-				f->R.rax = -1;
-				return;
-			}
-
-			if (curr_fd_table[fd] == NULL)
-			{
-				f->R.rax = -1;
-				return;
-			}
-
-			f->R.rax = (uint64_t)file_write(curr_fd_table[fd], buf, len);
+			f->R.rax = -1;
 			return;
 		}
+		f->R.rax = (uint64_t)file_write(file, buf, len);
+		return;
 	}
 	case SYS_SEEK:
 	{
@@ -401,23 +236,13 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_CLOSE:
 	{
-		struct file **curr_fd_table;
-		int size;
-		int fd;
-
-		fd = (int)f->R.rdi;
-
-		size = PGSIZE / sizeof(*curr_fd_table);
-		if (fd < 2 || fd >= size)
-			break;
-
-		curr_fd_table = thread_current()->fd_table;
-
-		if (curr_fd_table == NULL || curr_fd_table[fd] == NULL)
-			break;
-
-		file_close(curr_fd_table[fd]);
-		curr_fd_table[fd] = NULL;
+		int fd = (int)f->R.rdi;
+		struct file *file = lookup_file(fd);
+		if (file != NULL)
+		{
+			file_close(file);
+			thread_current()->fd_table[fd] = NULL;
+		}
 		break;
 	}
 	default:
@@ -425,6 +250,55 @@ void syscall_handler(struct intr_frame *f)
 		break;
 	}
 	}
+}
+
+/* 종료 문자까지 검증하며, 기존 명령줄 한 페이지 제한을 유지합니다. */
+static size_t check_user_string(const char *str)
+{
+	struct thread *curr = thread_current();
+	if (str == NULL)
+		exit_helper(thread_name(), -1);
+
+	for (size_t len = 0; len < PGSIZE; len++)
+	{
+		const char *pos = str + len;
+		if (!is_user_vaddr(pos) || pml4_get_page(curr->pml4, pos) == NULL)
+			exit_helper(thread_name(), -1);
+		if (*pos == '\0')
+			return len;
+	}
+	exit_helper(thread_name(), -1);
+}
+
+/* writable은 커널이 사용자 버퍼에 쓰는 READ에서만 요구합니다. */
+static bool check_user_buffer(const void *buffer, unsigned len, bool writable)
+{
+	if (len == 0)
+		return true;
+	if (buffer == NULL || !is_user_vaddr(buffer))
+		exit_helper(thread_name(), -1);
+	if (len > (uintptr_t)KERN_BASE - (uintptr_t)buffer)
+		return false;
+
+	struct thread *curr = thread_current();
+	uintptr_t last = (uintptr_t)pg_round_down((uintptr_t)buffer + len - 1);
+	for (uintptr_t pg = (uintptr_t)pg_round_down(buffer); pg <= last; pg += PGSIZE)
+	{
+		if (pml4_get_page(curr->pml4, (const void *)pg) == NULL)
+			exit_helper(thread_name(), -1);
+		uint64_t *pte = pml4e_walk(curr->pml4, pg, 0);
+		if (!is_user_pte(pte) || (writable && !is_writable(pte)))
+			exit_helper(thread_name(), -1);
+	}
+	return true;
+}
+
+static struct file *lookup_file(int fd)
+{
+	struct file **table = thread_current()->fd_table;
+	if (fd < 2 || (size_t)fd >= PGSIZE / sizeof(*table) || table == NULL)
+		return NULL;
+	return table[fd];
 }
 
 /* 임시 종료 헬퍼 함수입니다.
