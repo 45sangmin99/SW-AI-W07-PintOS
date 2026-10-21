@@ -57,6 +57,12 @@ void syscall_handler(struct intr_frame *f)
 		}
 		f->R.rax = filesys_create(f->R.rdi, f->R.rsi);
 		return;
+	case SYS_REMOVE:
+		if(!f->R.rdi || !is_user_vaddr(f->R.rdi) || !pml4_get_page(thread_current()->pml4, f->R.rdi)){
+			break;
+		}
+		filesys_remove(f->R.rdi);
+		return;
 	case SYS_OPEN:{
 		if(!f->R.rdi || !is_user_vaddr(f->R.rdi) || !pml4_get_page(thread_current()->pml4, f->R.rdi)){
 			break;
@@ -101,6 +107,11 @@ void syscall_handler(struct intr_frame *f)
 		}
 		return;
 	}
+	case SYS_SEEK:{
+		struct file_descriptor *fd = find_file_descriptor_by_fd(f->R.rdi);
+		file_seek(fd->file, f->R.rsi);
+		return;
+	}
 	case SYS_WAIT:
 		f->R.rax = process_wait(f->R.rdi);
 		return;
@@ -122,11 +133,12 @@ void syscall_handler(struct intr_frame *f)
 		f->R.rax = process_exec(temp);
 		return;
 	default:
-		printf("%s is unknown systemcall \n", f->R.rax);
+		printf("%d is unknown systemcall \n", f->R.rax);
 		break;
 	}
 	f->R.rdi = -1;
 	printf("%s: exit(%d)\n",thread_name() ,f->R.rdi);
+	if(thread_current()->parent)find_child_by_tid(&thread_current()->parent->children,thread_current()->tid)->exit_status = -1;
 	thread_exit();
 	// TODO: Your implementation goes here.
 	// printf("system call!\n");

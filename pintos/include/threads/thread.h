@@ -11,6 +11,8 @@
 #include "vm/vm.h"
 #endif
 
+#include "filesys/file.h"
+
 /* States in a thread's life cycle. */
 enum thread_status
 {
@@ -93,6 +95,7 @@ struct thread
     struct list children;
     struct thread *parent;
 
+    struct file *file;
     struct list file_descriptor_list;
     int next_fd;
 
@@ -116,6 +119,7 @@ struct child
     tid_t tid;
     struct semaphore wait_child;
     int exit_status;
+    bool is_successfully_forked;
     bool is_exit;
 };
 
@@ -127,7 +131,7 @@ struct file_descriptor
 };
 
 struct child *find_child_by_tid(struct list *, tid_t);
-struct child *add_child(struct list *, tid_t);
+struct child *add_child(struct child *, struct list *, tid_t);
 struct file_descriptor *find_file_descriptor_by_fd(int);
 
 /* If false (default), use round-robin scheduler.

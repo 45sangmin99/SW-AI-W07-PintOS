@@ -547,9 +547,8 @@ struct child *find_child_by_tid(struct list *children, tid_t tid){
 	return NULL;
 }
 
-struct child *add_child(struct list *children, tid_t tid){
+struct child *add_child(struct child *child, struct list *children, tid_t tid){
 	struct thread *child_thread = thread_get_by_tid(tid);
-	struct child *child = malloc(sizeof(struct child));
 	list_push_back(children, &child->child_elem);
 	child->tid = tid;
 	child->is_exit = false;
