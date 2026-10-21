@@ -105,6 +105,21 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_CREATE:
 	{
+		const char *filename;
+		unsigned init_size;
+
+		filename = (const char *)f->R.rdi;
+		init_size = f->R.rsi;
+
+		check_user_string(filename);
+
+		if (init_size > INT32_MAX)
+		{
+			f->R.rax = false;
+			return;
+		}
+
+		f->R.rax = filesys_create(filename, (off_t)init_size);
 		break;
 	}
 	case SYS_REMOVE:
