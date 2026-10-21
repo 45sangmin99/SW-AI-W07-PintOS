@@ -525,11 +525,14 @@ int thread_get_recent_cpu(void)
 }
 
 /* Find thread pointer by TID */
-struct thread *thread_get_by_tid(tid_t tid){
-	for(struct list_elem *element = list_begin(&threads);
-	element != list_tail(&threads);
-	element = list_next(element)){
-		if(list_entry(element, struct thread, threads_elem)->tid == tid){
+struct thread *thread_get_by_tid(tid_t tid)
+{
+	for (struct list_elem *element = list_begin(&threads);
+		 element != list_tail(&threads);
+		 element = list_next(element))
+	{
+		if (list_entry(element, struct thread, threads_elem)->tid == tid)
+		{
 			return list_entry(element, struct thread, threads_elem);
 		}
 	};
@@ -605,7 +608,9 @@ init_thread(struct thread *t, const char *name, int priority)
 	list_init(&t->donations);
 	t->magic = THREAD_MAGIC;
 	list_push_back(&threads, &t->threads_elem);
-	sema_init(&t->wait_childexit, 0);
+
+	/* wait 관련 초기화 */
+	list_init(&t->children);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

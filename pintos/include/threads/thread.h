@@ -20,6 +20,9 @@ enum thread_status
     THREAD_DYING    /* About to be destroyed. */
 };
 
+struct child_status;
+struct file;
+
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -80,15 +83,14 @@ struct thread
     struct list donations;         /* Threads donating to this thread. */
     struct lock *waiting_lock;     /* Lock this thread is waiting for. */
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
-    struct list_elem threads_elem;      /* for implement mlfqs */
-    /**
-     * 자식이 부모를 세마포어에 넣어서 자식이 waiting을 구현.
-     * linux는 waiting queue를 통해 이를 구현했으나,
-     * 우리는 가진게 semaphore 뿐이니까 세마포어를 씁시다.
-     * https://github.com/torvalds/linux/blob/master/include/linux/sched/signal.h
-     */
-    struct semaphore wait_childexit;
+    struct list_elem elem;         /* List element. */
+    struct list_elem threads_elem; /* for implement mlfqs */
+
+    struct list children;            /* 후레자식들 */
+    struct child_status *own_status; /* 상태를 전달하기 위한 구조체 */
+
+    struct file **fd_table; /* FD table */
+    struct file *exec_file;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
