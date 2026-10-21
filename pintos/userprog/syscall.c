@@ -12,13 +12,15 @@
 #include "threads/palloc.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "threads/init.h"
+#include "devices/input.h"
 
 #include "include/lib/kernel/stdio.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
-static void exit_helper(const char *name, int status);
+static void exit_helper(const char *name, int status) NO_RETURN;
 
 /* System call.
  *
@@ -52,10 +54,13 @@ void syscall_handler(struct intr_frame *f)
 	switch (f->R.rax)
 	{
 	case SYS_HALT:
+	{
+		power_off();
+		NOT_REACHED();
+	}
 	case SYS_EXIT:
 	{
 		exit_helper(thread_name(), (int)f->R.rdi);
-		break;
 	}
 	case SYS_FORK:
 	{
@@ -197,15 +202,117 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_FILESIZE:
 	{
+		struct file **curr_fd_table;
+		int fd;
+
+		fd = f->R.rdi;
+
+		if (fd < 2 || fd >= PGSIZE / sizeof(*curr_fd_table))
+		{
+			f->R.rax = -1;
+			return;
+		}
+
+		curr_fd_table = thread_current()->fd_table;
+		if (curr_fd_table == NULL || curr_fd_table[fd] == NULL)
+		{
+			f->R.rax = -1;
+			return;
+		}
+
+		f->R.rax = file_length(curr_fd_table[fd]);
 		break;
 	}
 	case SYS_READ:
 	{
+		struct thread *curr;
+		struct file **curr_fd_table;
+		int fd;
+		char *buf;
+		unsigned len;
+
+		uint64_t pg_start;
+		uint64_t pg_end;
+
+		fd = f->R.rdi;
+		buf = (char *)f->R.rsi;
+		len = (off_t)f->R.rdx;
+
+		if (len == 0)
+		{
+			f->R.rax = 0;
+			return;
+		}
+
+		/* 주소 범위 검사 */
+		if (buf == NULL || !is_user_vaddr(buf))
+			exit_helper(thread_name(), -1);
+
+		if (len > (uintptr_t)KERN_BASE - (uintptr_t)buf)
+		{
+			f->R.rax = -1;
+			return;
+		}
+
+		curr = thread_current();
+
+		/* 페이지 매핑과 NULL 검사 */
+
+		pg_start = (uintptr_t)pg_round_down((uintptr_t)buf);
+		pg_end = (uintptr_t)pg_round_down((uintptr_t)buf + len - 1);
+
+		for (uint64_t pg = pg_start; pg <= pg_end; pg += PGSIZE)
+		{
+			if (pml4_get_page(curr->pml4, (const void *)pg) == NULL)
+				exit_helper(thread_name(), -1);
+
+			uint64_t *pte = pml4e_walk(curr->pml4, pg, 0);
+			if (!is_user_pte(pte) || !is_writable(pte))
+				exit_helper(thread_name(), -1);
+		}
+
+		curr_fd_table = curr->fd_table;
+
+		/* 표준 출력일 경우 오류 */
+		if (fd == 1)
+		{
+			f->R.rax = -1;
+			return;
+		}
+
+		/* 표준 입력 분기 */
+		if (fd == 0)
+		{
+			for (size_t i = 0; i < len; i++)
+				buf[i] = input_getc();
+			f->R.rax = len;
+		}
+		/* 일반 파일 분기 */
+		else
+		{
+			if (curr_fd_table == NULL || fd < 0 || fd >= PGSIZE / sizeof(*curr_fd_table))
+			{
+				f->R.rax = -1;
+				return;
+			}
+
+			if (curr_fd_table[fd] == NULL)
+			{
+				f->R.rax = -1;
+				return;
+			}
+
+			f->R.rax = (uint64_t)(curr_fd_table[fd], buf, len);
+		}
+
 		break;
 	}
 	case SYS_WRITE:
 	{
-		if (f->R.rdi == 1)
+		int fd;
+
+		fd = f->R.rdi;
+		if (fd == 1)
 			putbuf(f->R.rsi, f->R.rdx);
 		break;
 	}
