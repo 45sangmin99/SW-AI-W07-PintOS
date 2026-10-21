@@ -71,6 +71,9 @@ void syscall_handler(struct intr_frame *f)
 		const char *t_name;
 
 		t_name = (const char *)f->R.rdi;
+
+		check_user_string(t_name);
+
 		success = process_fork(t_name, f);
 
 		/* 사용자 프로그램에 결과 전달 */
