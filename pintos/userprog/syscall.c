@@ -70,7 +70,7 @@ void syscall_handler(struct intr_frame *f)
 		tid_t success;
 		const char *t_name;
 
-		t_name = f->R.rdi;
+		t_name = (const char *)f->R.rdi;
 		success = process_fork(t_name, f);
 
 		/* 사용자 프로그램에 결과 전달 */
@@ -124,6 +124,12 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_REMOVE:
 	{
+		const char *filename;
+
+		filename = (const char *)f->R.rdi;
+		check_user_string(filename);
+
+		f->R.rax = filesys_remove(filename);
 		break;
 	}
 	case SYS_OPEN:
@@ -243,10 +249,36 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_SEEK:
 	{
+		int fd;
+		unsigned pos;
+
+		fd = (int)f->R.rdi;
+		pos = (unsigned)f->R.rsi;
+
+		struct file *file = lookup_file(fd);
+		if (file == NULL)
+			return;
+
+		if (pos > INT32_MAX)
+			return;
+
+		file_seek(file, (off_t)pos);
 		break;
 	}
 	case SYS_TELL:
 	{
+		int fd;
+
+		fd = (int)f->R.rdi;
+
+		struct file *file = lookup_file(fd);
+		if (file == NULL)
+		{
+			f->R.rax = -1;
+			return;
+		}
+
+		f->R.rax = file_tell(file);
 		break;
 	}
 	case SYS_CLOSE:
