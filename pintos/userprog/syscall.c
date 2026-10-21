@@ -20,7 +20,7 @@
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
-static void exit_helper(const char *name, int status) NO_RETURN;
+static void exit_helper(int status) NO_RETURN;
 static size_t check_user_string(const char *str);
 static bool check_user_buffer(const void *buffer, unsigned len, bool writable);
 static struct file *lookup_file(int fd);
@@ -63,7 +63,7 @@ void syscall_handler(struct intr_frame *f)
 	}
 	case SYS_EXIT:
 	{
-		exit_helper(thread_name(), (int)f->R.rdi);
+		exit_helper((int)f->R.rdi);
 	}
 	case SYS_FORK:
 	{
@@ -84,14 +84,14 @@ void syscall_handler(struct intr_frame *f)
 	case SYS_EXEC:
 	{
 		const char *cmd_line = (const char *)f->R.rdi;
-		const char *t_name = thread_name();
+
 		size_t size = check_user_string(cmd_line);
 		char *f_name = palloc_get_page(0);
 		if (f_name == NULL)
-			exit_helper(t_name, -1);
+			exit_helper(-1);
 
 		if (process_exec(memcpy(f_name, cmd_line, size + 1)) == -1)
-			exit_helper(t_name, -1);
+			exit_helper(-1);
 		break;
 	}
 	case SYS_WAIT:
@@ -307,17 +307,17 @@ static size_t check_user_string(const char *str)
 {
 	struct thread *curr = thread_current();
 	if (str == NULL)
-		exit_helper(thread_name(), -1);
+		exit_helper(-1);
 
 	for (size_t len = 0; len < PGSIZE; len++)
 	{
 		const char *pos = str + len;
 		if (!is_user_vaddr(pos) || pml4_get_page(curr->pml4, pos) == NULL)
-			exit_helper(thread_name(), -1);
+			exit_helper(-1);
 		if (*pos == '\0')
 			return len;
 	}
-	exit_helper(thread_name(), -1);
+	exit_helper(-1);
 }
 
 /* writable은 커널이 사용자 버퍼에 쓰는 READ에서만 요구합니다. */
@@ -326,7 +326,7 @@ static bool check_user_buffer(const void *buffer, unsigned len, bool writable)
 	if (len == 0)
 		return true;
 	if (buffer == NULL || !is_user_vaddr(buffer))
-		exit_helper(thread_name(), -1);
+		exit_helper(-1);
 	if (len > (uintptr_t)KERN_BASE - (uintptr_t)buffer)
 		return false;
 
@@ -335,10 +335,10 @@ static bool check_user_buffer(const void *buffer, unsigned len, bool writable)
 	for (uintptr_t pg = (uintptr_t)pg_round_down(buffer); pg <= last; pg += PGSIZE)
 	{
 		if (pml4_get_page(curr->pml4, (const void *)pg) == NULL)
-			exit_helper(thread_name(), -1);
+			exit_helper(-1);
 		uint64_t *pte = pml4e_walk(curr->pml4, pg, 0);
 		if (!is_user_pte(pte) || (writable && !is_writable(pte)))
-			exit_helper(thread_name(), -1);
+			exit_helper(-1);
 	}
 	return true;
 }
@@ -353,13 +353,12 @@ static struct file *lookup_file(int fd)
 
 /* 임시 종료 헬퍼 함수입니다.
  * 추후 커널에서의 종료 계약이 완료되면, 대체할 수 있습니다. */
-static void exit_helper(const char *name, int status)
+static void exit_helper(int status)
 {
 	struct thread *curr = thread_current();
 
 	if (curr->own_status != NULL)
 		curr->own_status->exit_status = status;
 
-	printf("%s: exit(%d)\n", name, status);
 	thread_exit();
 }

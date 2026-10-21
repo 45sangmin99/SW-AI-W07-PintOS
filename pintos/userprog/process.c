@@ -238,6 +238,8 @@ __do_fork(void *aux)
 	struct intr_frame if_;
 	struct fork_context *ctx;
 	struct thread *current;
+	struct file **parent_fd_table;
+	struct file **child_fd_table;
 
 	current = thread_current();
 	ctx = (struct fork_context *)aux;
@@ -262,11 +264,26 @@ __do_fork(void *aux)
 
 #endif
 
-	/* TODO: Your code goes here.
-	 * TODO: Hint) To duplicate the file object, use `file_duplicate`
-	 * TODO:       in include/filesys/file.h. Note that parent should not return
-	 * TODO:       from the fork() until this function successfully duplicates
-	 * TODO:       the resources of parent.*/
+	/* 자식 fd_table 할당 및 복사 */
+	child_fd_table = palloc_get_page(PAL_ZERO);
+	if (child_fd_table == NULL)
+		goto error;
+		
+	current->fd_table = child_fd_table;
+
+	parent_fd_table = ctx->parent->fd_table;
+	if (parent_fd_table == NULL)
+		goto error;
+
+	for (int i = 2; i < PGSIZE / sizeof(*parent_fd_table); i++)
+	{
+		if (parent_fd_table[i])
+		{
+			child_fd_table[i] = file_duplicate(parent_fd_table[i]);
+			if (child_fd_table[i] == NULL)
+				goto error;
+		}
+	}
 
 	process_init();
 
@@ -411,6 +428,7 @@ void process_exit(void)
 	/* 종료 통보 */
 	if (curr->own_status != NULL)
 	{
+		printf("%s: exit(%d)\n", curr->name, curr->own_status->exit_status);
 		sema_up(&(curr->own_status->exit_sema));
 		child_status_put(curr->own_status);
 	}
