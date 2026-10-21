@@ -34,6 +34,11 @@ struct fork_p_args {
 	bool success; // 자식복제 성공여부
 	struct child_status * shared_status; /* fork에 do_fork 기록전달 */
 };
+struct initd_args {
+	char *fn_copy; /* 파일이름 복사 */
+	struct child_status *shared; /* 공유구조체 포인터 */
+	struct semaphore sema; /* initd가 인자를 꺼낼 때까지 부모 대기 */
+};
 
 /* General process initializer for initd and other process. */
 static void
@@ -51,25 +56,57 @@ tid_t process_create_initd(const char *file_name)
 {
 	char *fn_copy;
 	tid_t tid;
+	struct child_status *shared;
+	struct initd_args args;
+
+	/* 공유 구조체 할당 및 초기화 */
+	shared = palloc_get_page(PAL_ZERO);
+	if (shared == NULL)
+		return TID_ERROR;
+	shared->ref_count = 2;
+	sema_init(&shared->exit_sema, 0);
+	shared->exit_status = -1;
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
 	fn_copy = palloc_get_page(0);
-	if (fn_copy == NULL)
+	if (fn_copy == NULL) {
+		palloc_free_page(shared);
 		return TID_ERROR;
+	}
 	strlcpy(fn_copy, file_name, PGSIZE);
 
+	args.fn_copy = fn_copy;
+	args.shared = shared;
+	sema_init(&args.sema, 0);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
-	if (tid == TID_ERROR)
+	tid = thread_create(file_name, PRI_DEFAULT, initd, &args);
+	if (tid == TID_ERROR) {
 		palloc_free_page(fn_copy);
+		palloc_free_page(shared);
+		return TID_ERROR;
+	}
+
+	/* 부모(메인) 리스트에 등록 */
+	shared->child_tid = tid;
+	list_push_back(&thread_current()->p_childlist, &shared->elem);
+
+	/* initd가 args를 꺼내 갈 때까지 대기 (args는 이 함수의 스택 변수) */
+	sema_down(&args.sema);
 	return tid;
 }
 
 /* A thread function that launches first user process. */
 static void
-initd(void *f_name)
+initd(void *aux)
 {
+	struct initd_args *args = aux;
+	char *f_name = args->fn_copy;
+
+	thread_current()->child_status = args->shared;
+	sema_up(&args->sema);
+
 #ifdef VM
 	supplemental_page_table_init(&thread_current()->spt);
 #endif

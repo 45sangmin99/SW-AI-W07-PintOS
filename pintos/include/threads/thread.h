@@ -19,14 +19,6 @@ enum thread_status
     THREAD_BLOCKED, /* Waiting for an event to trigger. */
     THREAD_DYING    /* About to be destroyed. */
 };
-struct child_status {
-	struct list_elem elem; /* thread.h p_child 연결*/
-	tid_t child_tid; /* child TID */
-	int exit_status; /* 부모에게 exit값 반환 */
-	struct semaphore exit_sema; /* 자식 종료를 부모가 기다림 */
-	bool wait_check; /* 부모가 자식 wait상태 체크 */
-	int ref_count; /* 공유구조체를 참조한 부모 자식수 */
-};
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
@@ -161,4 +153,12 @@ void thread_preempt(void);
 void thread_refresh_priority(struct thread *);
 void thread_donate_priority(void);
 
+struct child_status {
+	struct list_elem elem; /* thread.h p_child 연결*/
+	tid_t child_tid; /* child TID */
+	int exit_status; /* 부모에게 exit값 반환 */
+	struct semaphore exit_sema; /* 자식 종료를 부모가 기다림 */
+	bool wait_check; /* 부모가 자식 wait상태 체크 */
+	int ref_count; /* 공유구조체를 참조한 부모 자식수 */
+};
 #endif /* threads/thread.h */
