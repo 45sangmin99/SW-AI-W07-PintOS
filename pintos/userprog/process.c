@@ -52,7 +52,10 @@ tid_t process_create_initd(const char *file_name)
 	strlcpy(fn_copy, file_name, PGSIZE);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
+	char name[16], *space;
+	strlcpy(name, file_name, sizeof name);
+	if(space=strchr(name, ' '))*space='\0';
+	tid = thread_create(name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page(fn_copy);
 	return tid;
@@ -77,17 +80,21 @@ initd(void *f_name)
  * TID_ERROR if the thread cannot be created. */
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
+	enum intr_level old_level = intr_disable();
+
 	/* Clone current thread to new thread.*/
-	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
-	struct thread *child = thread_get_by_tid(child_tid);
 	struct intr_frame child_if = *if_;
-	
-	child_if.R.rax = 0x0; 
-	if_->R.rax = child_tid;
-	
-	thread_current()->tf = *if_;
-	child->tf = child_if;
-	return child_tid;
+	child_if.R.rax = thread_current(); 
+	struct child *child = malloc(sizeof(struct child));
+	if(!child)return -1;
+	tid_t child_tid = thread_create(if_->R.rdi, PRI_DEFAULT, __do_fork, &child_if);
+	if(child_tid == -1&&(free(child),1))return -1;
+	struct thread *child_thread = thread_get_by_tid(add_child(child, &thread_current()->children, child_tid)->tid);
+	if_->R.rax = child_thread->tid;
+
+	intr_set_level(old_level);
+	sema_down(&child->wait_child);
+	return child->is_successfully_forked ? child_tid : -1;
 }
 
 #ifndef VM
@@ -103,7 +110,7 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
-	if(thread_name() == "main")return 0;
+	if(is_kern_pte(pte))return 1;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page(parent->pml4, va);
@@ -137,14 +144,16 @@ static void
 __do_fork(void *aux)
 {
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *)aux;
 	struct thread *current = thread_current();
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame *parent_if = (struct intr_frame *)aux;
+	struct thread *parent = parent_if->R.rax;
+	current->parent = parent;
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
 	memcpy(&if_, parent_if, sizeof(struct intr_frame));
+	if_.R.rax = 0x0;
 
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
@@ -167,12 +176,29 @@ __do_fork(void *aux)
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 
+	for(struct list_elem *element = list_begin(&parent->file_descriptor_list);
+		element != list_tail(&parent->file_descriptor_list); 
+		element = list_next(element)){
+			struct file_descriptor *fd = malloc(sizeof(struct file_descriptor));
+			if(!fd)goto error;
+			memcpy(fd, list_entry(element, struct file_descriptor, file_descriptor_list_elem), sizeof(struct file_descriptor));
+			fd->file = file_duplicate(list_entry(element, struct file_descriptor, file_descriptor_list_elem)->file);
+			list_push_back(&current->file_descriptor_list, &fd->file_descriptor_list_elem);
+		}
+	current->next_fd = parent->next_fd;
+	current->file = file_duplicate(parent->file);
 	process_init();
 
 	/* Finally, switch to the newly created process. */
 	if (succ)
+		find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->is_successfully_forked = true;
+		sema_up(&find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->wait_child);
 		do_iret(&if_);
 error:
+	find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->exit_status = -1;
+	find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->is_exit= true;
+	find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->is_successfully_forked= false;
+	sema_up(&find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->wait_child);
 	thread_exit();
 }
 
@@ -195,12 +221,17 @@ int process_exec(void *f_name)
 	process_cleanup();
 
 	/* And then load the binary */
+	file_close(thread_current()->file);
 	success = load(file_name, &_if);
 
 	/* If load failed, quit. */
 	palloc_free_page(file_name);
-	if (!success)
+	if (!success){
+		if(thread_current()->parent)find_child_by_tid(&thread_current()->parent->children, thread_current()->tid)->exit_status = -1;
+		printf("%s: exit(%d)\n", thread_name(), -1);
+		thread_exit();
 		return -1;
+	}
 
 	/* Start switched process. */
 	do_iret(&_if);
@@ -221,21 +252,54 @@ process_wait (tid_t child_tid) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	struct thread *t = thread_get_by_tid(child_tid);
-	sema_down(&(t->wait_childexit));
-	return -1;
+	// if(!thread_get_by_tid(child_tid)) return -1;
+	struct child *ch = find_child_by_tid(&thread_current()->children, child_tid);
+	if(!ch){
+		struct child *child = malloc(sizeof(struct child));
+		if(!child){
+			printf("여길 진짜 온다고?");
+		}
+		ch = add_child(child, &thread_current()->children ,child_tid);
+		if(thread_get_by_tid(child_tid))thread_get_by_tid(child_tid)->parent = thread_current();
+		else return -1;
+	}
+	if(ch->is_exit){
+		int value = ch->exit_status;
+		ch->exit_status = -1;
+		return value;
+	}
+	sema_down(&ch->wait_child);
+	ch->is_exit = true;
+	int value = ch->exit_status;
+	ch->exit_status = -1;
+	return value;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void)
 {
 	struct thread *curr = thread_current();
+	struct child *child = curr->parent ? find_child_by_tid(&curr->parent->children, curr->tid) : NULL;
+	if(thread_current()->file)file_close(thread_current()->file);
+	for(;!list_empty(&curr->children);){
+		struct child *child = list_entry(list_pop_front(&curr->children),struct child, child_elem);
+		if(thread_get_by_tid(child->tid))thread_get_by_tid(child->tid)->parent = NULL;
+		free(child);
+	}
+	for(struct list_elem *elem = list_begin(&thread_current()->file_descriptor_list)->next;
+		elem != list_tail(&thread_current()->file_descriptor_list)->next;
+		elem = elem->next){
+			if(list_entry(list_prev(elem), struct file_descriptor, file_descriptor_list_elem)->file)file_close((list_entry(list_prev(elem), struct file_descriptor, file_descriptor_list_elem)->file));
+			free(list_entry(list_prev(elem), struct file_descriptor, file_descriptor_list_elem));
+	}
+	if(thread_current()->parent){
+		sema_up(&child->wait_child);
+	}
 	/* TODO: Your code goes here.
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-	sema_up(&(thread_current()->wait_childexit));
- 	process_cleanup ();
+ 	process_cleanup();
 }
 
 /* Free the current process's resources. */
@@ -381,10 +445,7 @@ load(const char *file_name, struct intr_frame *if_)
 			argc ++;
 			if_->R.rsi -= temp - p;
 			memcpy(if_->R.rsi, p, temp-p);
-			if(p==file_name){
-				strlcpy(thread_current()->name, file_name, temp-p);
-				break;
-			}
+			if(p==file_name)break;
 			temp = p;
 			*(p-1) = '\0';
 		}
@@ -406,9 +467,12 @@ load(const char *file_name, struct intr_frame *if_)
 	file = filesys_open(file_name);
 	if (file == NULL)
 	{
+		thread_current()->file = NULL;
 		printf("load: %s: open failed\n", file_name);
 		goto done;
 	}
+	thread_current()->file = file;
+	file_deny_write(file); 
 
 	/* executable header를 읽고 검증 */
 	if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 0x3E // amd64
@@ -484,7 +548,6 @@ load(const char *file_name, struct intr_frame *if_)
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close(file);
 	return success;
 }
 

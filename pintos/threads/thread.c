@@ -533,7 +533,38 @@ struct thread *thread_get_by_tid(tid_t tid){
 			return list_entry(element, struct thread, threads_elem);
 		}
 	};
-	NOT_REACHED();
+	return NULL;
+}
+
+struct child *find_child_by_tid(struct list *children, tid_t tid){
+	for(struct list_elem *element = list_begin(children);
+	element != list_tail(children);
+	element = list_next(element)){
+		if(list_entry(element, struct child, child_elem)->tid == tid){
+			return list_entry(element, struct child, child_elem);
+		}
+	};
+	return NULL;
+}
+
+struct child *add_child(struct child *child, struct list *children, tid_t tid){
+	struct thread *child_thread = thread_get_by_tid(tid);
+	list_push_back(children, &child->child_elem);
+	child->tid = tid;
+	child->is_exit = false;
+	sema_init(&child->wait_child, 0);
+	return child;
+}
+
+struct file_descriptor *find_file_descriptor_by_fd(int fd){
+	for(struct list_elem *element = list_begin(&thread_current()->file_descriptor_list);
+	element != list_tail(&thread_current()->file_descriptor_list);
+	element = list_next(element)){
+		if(list_entry(element, struct file_descriptor, file_descriptor_list_elem)->fd == fd){
+			return list_entry(element, struct file_descriptor, file_descriptor_list_elem);
+		}
+	};
+	return NULL;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -605,7 +636,10 @@ init_thread(struct thread *t, const char *name, int priority)
 	list_init(&t->donations);
 	t->magic = THREAD_MAGIC;
 	list_push_back(&threads, &t->threads_elem);
-	sema_init(&t->wait_childexit, 0);
+	sema_init(&t->wait, 0);
+	list_init(&t->children);
+	list_init(&t->file_descriptor_list);
+	t->next_fd = 2;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

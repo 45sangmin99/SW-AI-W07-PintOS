@@ -11,6 +11,8 @@
 #include "vm/vm.h"
 #endif
 
+#include "filesys/file.h"
+
 /* States in a thread's life cycle. */
 enum thread_status
 {
@@ -88,7 +90,14 @@ struct thread
      * 우리는 가진게 semaphore 뿐이니까 세마포어를 씁시다.
      * https://github.com/torvalds/linux/blob/master/include/linux/sched/signal.h
      */
-    struct semaphore wait_childexit;
+    struct semaphore wait;
+
+    struct list children;
+    struct thread *parent;
+
+    struct file *file;
+    struct list file_descriptor_list;
+    int next_fd;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -103,6 +112,27 @@ struct thread
     struct intr_frame tf; /* Information for switching. */
     unsigned magic;       /* Detects stack overflow. */
 };
+
+struct child
+{
+    struct list_elem child_elem;
+    tid_t tid;
+    struct semaphore wait_child;
+    int exit_status;
+    bool is_successfully_forked;
+    bool is_exit;
+};
+
+struct file_descriptor
+{
+    struct list_elem file_descriptor_list_elem;
+    int fd;
+    struct file *file;
+};
+
+struct child *find_child_by_tid(struct list *, tid_t);
+struct child *add_child(struct child *, struct list *, tid_t);
+struct file_descriptor *find_file_descriptor_by_fd(int);
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
